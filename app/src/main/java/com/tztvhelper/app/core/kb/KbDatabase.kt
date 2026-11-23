@@ -15,6 +15,11 @@ import org.json.JSONObject
 class KbDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
 
     override fun onCreate(db: SQLiteDatabase) {
+        createCoreTables(db)
+        createSearchTables(db)
+    }
+
+    private fun createCoreTables(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE brands(
                 id TEXT PRIMARY KEY,
@@ -75,9 +80,119 @@ class KbDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB
         db.execSQL("CREATE INDEX idx_verifications_method ON verifications(method_id)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // 第一版只有 v1；以后加字段在这里逐版迁移，禁止 drop 重建（会丢历史记录）
+    /** 搜索结果缓存 + 原始来源留档（即使没转成方法，也要能追溯） */
+    private fun createSearchTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS search_cache(
+                cache_key TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                is_mock INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            )"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS search_hits(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '',
+                snippet TEXT NOT NULL DEFAULT '',
+                source_type TEXT NOT NULL DEFAULT 'UNKNOWN',
+                credibility TEXT NOT NULL DEFAULT 'UNVERIFIED',
+                fetched_at INTEGER NOT NULL,
+                is_mock INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_hits_key ON search_hits(cache_key)")
     }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // 只加表、不删数据：历史验证记录必须长期保留
+        if (oldVersion < 2) createSearchTables(db)
+    }
+
+    // ---------- 搜索缓存 ----------
+
+    fun cacheGet(key: String): CachedSearch? =
+        readableDatabase.rawQuery("SELECT * FROM search_cache WHERE cache_key = ?", arrayOf(key))
+            .use { c ->
+                if (!c.moveToFirst()) null else CachedSearch(
+                    key = c.getString(0),
+                    provider = c.getString(1),
+                    payload = c.getString(2),
+                    isMock = c.getInt(3) == 1,
+                    createdAt = c.getLong(4),
+                    expiresAt = c.getLong(5)
+                )
+            }
+
+    fun cachePut(c: CachedSearch) {
+        val cv = ContentValues().apply {
+            put("cache_key", c.key)
+            put("provider", c.provider)
+            put("payload", c.payload)
+            put("is_mock", if (c.isMock) 1 else 0)
+            put("created_at", c.createdAt)
+            put("expires_at", c.expiresAt)
+        }
+        writableDatabase.insertWithOnConflict("search_cache", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun insertSearchHits(key: String, hits: List<SearchHitRow>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            hits.forEach { h ->
+                val cv = ContentValues().apply {
+                    put("cache_key", key)
+                    put("title", h.title)
+                    put("url", h.url)
+                    put("snippet", h.snippet)
+                    put("source_type", h.sourceType)
+                    put("credibility", h.credibility)
+                    put("fetched_at", h.fetchedAt)
+                    put("is_mock", if (h.isMock) 1 else 0)
+                }
+                db.insert("search_hits", null, cv)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun searchHits(key: String): List<SearchHitRow> =
+        readableDatabase.rawQuery(
+            "SELECT title, url, snippet, source_type, credibility, fetched_at, is_mock " +
+                "FROM search_hits WHERE cache_key = ? ORDER BY id",
+            arrayOf(key)
+        ).use { c -> c.map {
+            SearchHitRow(
+                it.getString(0), it.getString(1), it.getString(2), it.getString(3),
+                it.getString(4), it.getLong(5), it.getInt(6) == 1
+            )
+        } }
+
+    data class CachedSearch(
+        val key: String,
+        val provider: String,
+        val payload: String,
+        val isMock: Boolean,
+        val createdAt: Long,
+        val expiresAt: Long
+    )
+
+    data class SearchHitRow(
+        val title: String,
+        val url: String,
+        val snippet: String,
+        val sourceType: String,
+        val credibility: String,
+        val fetchedAt: Long,
+        val isMock: Boolean
+    )
 
     // ---------- 品牌 / 型号 ----------
 
@@ -284,6 +399,6 @@ class KbDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB
 
     companion object {
         private const val DB_NAME = "kb.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
     }
 }

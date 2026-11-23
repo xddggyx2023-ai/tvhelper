@@ -14,8 +14,11 @@ android {
         applicationId = "com.tztvhelper.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
+
+        // 搜索服务地址：留空表示未部署；部署后改这里或运行时用 AppConfig.setSearchBaseUrl 覆盖
+        buildConfigField("String", "SEARCH_BASE_URL", "\"\"")
     }
 
     // 正式签名：密码放在 keystore.properties（不进仓库）
@@ -51,6 +54,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

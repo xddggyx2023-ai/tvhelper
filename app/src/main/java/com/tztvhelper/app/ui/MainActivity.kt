@@ -174,6 +174,9 @@ private fun App() {
             message = message,
             onOpenGuide = {
                 ctx.startActivity(android.content.Intent(ctx, GuideActivity::class.java))
+            },
+            onOpenAi = {
+                ctx.startActivity(android.content.Intent(ctx, AiActivity::class.java))
             }
         )
 
@@ -225,7 +228,8 @@ private fun HomeScreen(
     onScan: () -> Unit,
     onConnect: (String) -> Unit,
     message: String,
-    onOpenGuide: () -> Unit
+    onOpenGuide: () -> Unit,
+    onOpenAi: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -247,6 +251,15 @@ private fun HomeScreen(
                 .height(50.dp)
         ) {
             Text("不知道 ADB 怎么开？看开启教程", fontSize = 15.sp)
+        }
+
+        OutlinedButton(
+            onClick = onOpenAi,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+        ) {
+            Text("问 AI 助手（本地规则，不联网）", fontSize = 15.sp)
         }
 
         Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {

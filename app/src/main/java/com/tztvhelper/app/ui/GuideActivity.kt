@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tztvhelper.app.core.AppConfig
 import com.tztvhelper.app.core.kb.Brand
 import com.tztvhelper.app.core.kb.Credibility
 import com.tztvhelper.app.core.kb.KbRepository
@@ -49,7 +50,15 @@ import com.tztvhelper.app.core.kb.MatchResult
 import com.tztvhelper.app.core.kb.Method
 import com.tztvhelper.app.core.kb.MethodStatus
 import com.tztvhelper.app.core.kb.VerifyResult
+import com.tztvhelper.app.core.search.SaveResult
+import com.tztvhelper.app.core.search.SearchError
+import com.tztvhelper.app.core.search.SearchOutcome
+import com.tztvhelper.app.core.search.SearchProviderFactory
+import com.tztvhelper.app.core.search.SearchQuery
+import com.tztvhelper.app.core.search.SearchService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -96,6 +105,10 @@ private fun GuideScreen(onBack: () -> Unit) {
     var current by remember { mutableStateOf<Method?>(null) }
     var note by remember { mutableStateOf("") }
     var seeded by remember { mutableStateOf(false) }
+    var outcome by remember { mutableStateOf<SearchOutcome?>(null) }
+    var searching by remember { mutableStateOf(false) }
+    var searchNote by remember { mutableStateOf("") }
+    val searchStatus = remember { SearchProviderFactory.describe(ctx) }
 
     LaunchedEffect(Unit) {
         repo.ensureSeeded()
@@ -119,6 +132,37 @@ private fun GuideScreen(onBack: () -> Unit) {
             VerifyResult.SUCCESS_APP -> "已记录：APP 实测成功，这条方法升为推荐。"
             VerifyResult.SUCCESS_USER -> "已记录成功。累计 2 次成功后会升为推荐。"
             VerifyResult.FAILURE -> "已记录失败。原成功记录保留，方法转入待复核。"
+        }
+    }
+
+    fun runSearch() {
+        val b = brand ?: return
+        scope.launch {
+            searching = true
+            searchNote = ""
+            val svc = SearchService(
+                repo.database(), repo,
+                SearchProviderFactory.create(ctx), AppConfig.searchCacheTtlMs(ctx)
+            )
+            outcome = withContext(Dispatchers.IO) {
+                svc.search(SearchQuery(b.name, model.ifBlank { null }, osVersion.ifBlank { null }))
+            }
+            searching = false
+        }
+    }
+
+    fun saveCandidate() {
+        val b = brand ?: return
+        val o = outcome ?: return
+        val svc = SearchService(
+            repo.database(), repo,
+            SearchProviderFactory.create(ctx), AppConfig.searchCacheTtlMs(ctx)
+        )
+        searchNote = when (val r = svc.saveAsCandidate(o, b.id, null, "${b.name} 开启方法（来自搜索）")) {
+            is SaveResult.Saved -> "已存为候选方法，编号 ${r.methodId}。它在验证成功前不会变成推荐。"
+            SaveResult.MockBlocked -> "模拟数据不能写进知识库——否则以后分不清哪条是真的。"
+            SaveResult.NoSteps -> "这条结果里没有可用的步骤，不能存成教程。"
+            is SaveResult.Failed -> "保存失败：${r.reason}"
         }
     }
 
@@ -186,6 +230,23 @@ private fun GuideScreen(onBack: () -> Unit) {
                 .fillMaxWidth()
                 .height(50.dp)
         ) { Text("查本地知识库", fontSize = 16.sp) }
+
+        OutlinedButton(
+            onClick = { runSearch() },
+            enabled = brand != null && !searching,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+        ) { Text(if (searching) "搜索中…" else "联网搜索这个品牌 / 型号", fontSize = 14.sp) }
+
+        Text(
+            searchStatus,
+            color = if (searchStatus.contains("模拟")) GWarn else GDim,
+            fontSize = 11.sp
+        )
+
+        outcome?.let { o -> SearchOutcomeCard(o, onSave = { saveCandidate() }) }
+        if (searchNote.isNotBlank()) Text(searchNote, color = GWarn, fontSize = 12.sp)
 
         when (val r = result) {
             null -> Unit
@@ -327,3 +388,62 @@ private fun sourceText(m: Method): String {
 
 private fun fmt(ts: Long): String =
     if (ts <= 0) "-" else SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).format(Date(ts))
+
+@Composable
+private fun SearchOutcomeCard(o: SearchOutcome, onSave: () -> Unit) {
+    val r = o.response
+    Card(colors = CardDefaults.cardColors(containerColor = GCard)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (r.isMock) "模拟搜索结果" else "搜索结果（${r.hits.size} 条）",
+                    color = if (r.isMock) GWarn else Color.White,
+                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.width(8.dp))
+                if (o.fromCache) Text("来自缓存", color = GDim, fontSize = 11.sp)
+            }
+
+            if (r.isMock) {
+                Text(
+                    "这不是真实联网结果，只是用来验证搜索流程的样例数据，不能写进知识库。",
+                    color = GWarn, fontSize = 12.sp
+                )
+            }
+
+            val err = r.error
+            if (err != null) {
+                Text(errText(err), color = GBad, fontSize = 13.sp)
+            } else {
+                r.hits.forEach { h ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(h.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(h.url, color = GAccent, fontSize = 11.sp)
+                        Text(h.snippet, color = GDim, fontSize = 12.sp)
+                        Text(
+                            "来源：${SearchService.sourceLabel(h.sourceType)} · ${h.credibility.label()} · 抓取 ${fmt(h.fetchedAt)}",
+                            color = Color(0xFF8794AB), fontSize = 11.sp
+                        )
+                    }
+                }
+
+                if (o.canSaveToKb) {
+                    Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
+                        Text("存为候选方法（仍需实机验证）", fontSize = 13.sp)
+                    }
+                } else {
+                    Text("模拟数据不能存为方法。", color = GWarn, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+private fun errText(e: SearchError): String = when (e) {
+    SearchError.NOT_CONFIGURED -> "没有配置搜索服务：当前只能查本地知识库。"
+    SearchError.NETWORK -> "网络不通：检查手机网络，或稍后再试。"
+    SearchError.BLOCKED -> "被拦截（403/401）：服务器拒绝了这个请求。"
+    SearchError.TIMEOUT -> "搜索超时：网络慢或服务器没响应。"
+    SearchError.RATE_LIMIT -> "请求太频繁：等一会儿再搜。"
+    SearchError.PARSE_FAILED -> "返回结果解析失败：服务器格式可能变了。"
+}

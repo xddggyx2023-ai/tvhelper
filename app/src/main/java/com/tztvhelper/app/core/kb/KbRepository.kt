@@ -1,6 +1,7 @@
 package com.tztvhelper.app.core.kb
 
 import android.content.Context
+import com.tztvhelper.app.core.ai.TutorialLookup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -16,7 +17,10 @@ import org.json.JSONObject
  * 2. 每次成功/失败都留记录，历史只增不删。
  * 3. 匹配顺序：型号+版本 → 型号 → 品牌通用 → 没有。
  */
-class KbRepository(private val context: Context) {
+class KbRepository(private val context: Context) : TutorialLookup {
+
+    /** 搜索缓存等模块复用同一个数据库实例 */
+    fun database(): KbDatabase = db
 
     private val db = KbDatabase(context)
     private val seedLock = Mutex()
@@ -97,7 +101,8 @@ class KbRepository(private val context: Context) {
     fun models(brandId: String): List<TvModel> = db.models(brandId)
 
     /** 按 型号+版本 → 型号 → 品牌通用 的顺序找方法 */
-    fun find(brandId: String, modelId: String?, osVersion: String?): MatchResult {
+    override fun find(brandId: String?, modelId: String?, osVersion: String?): MatchResult {
+        if (brandId.isNullOrBlank()) return MatchResult.NotFound(null, modelId)
         val all = db.methodsFor(brandId, modelId)
         if (all.isEmpty()) return MatchResult.NotFound(brandId, modelId)
 

@@ -1,0 +1,29 @@
+{
+  "note": "本地模拟搜索数据，仅用于验证 搜索→缓存→展示→转候选 的流程，不是真实联网结果，不允许写入知识库。",
+  "hits": [
+    {
+      "title": "（模拟）小米电视4A 开启 ADB 调试步骤",
+      "url": "https://example.invalid/mock/xiaomi-4a-adb",
+      "snippet": "模拟结果：设置 → 账号与安全 → ADB 调试。真实联网后这里会是实际网页摘要。",
+      "sourceType": "FORUM",
+      "credibility": "FORUM",
+      "steps": [
+        "打开电视设置，进入「账号与安全」",
+        "找到「ADB 调试」并打开",
+        "在「关于 → 网络信息」记下 IP",
+        "电视弹窗选择「允许」"
+      ]
+    },
+    {
+      "title": "（模拟）小米电视开发者选项在哪",
+      "url": "https://example.invalid/mock/xiaomi-devtools",
+      "snippet": "模拟结果：部分固件在「更多设置 → 开发者选项」，需要先在关于里连点版本号。",
+      "sourceType": "UNKNOWN",
+      "credibility": "UNVERIFIED",
+      "steps": [
+        "设置 → 关于 → 连点版本号 7 次",
+        "返回上一级找「开发者选项」"
+      ]
+    }
+  ]
+}

@@ -35,7 +35,10 @@ data class SearchHit(
 data class SearchResponse(
     val hits: List<SearchHit> = emptyList(),
     val error: SearchError? = null,
-    val searchedAt: Long = 0L
+    val searchedAt: Long = 0L,
+    val provider: String = "",
+    /** true 表示本地模拟数据，不是真实联网结果。界面必须明示，且不许写进知识库。 */
+    val isMock: Boolean = false
 )
 
 enum class SearchError {
