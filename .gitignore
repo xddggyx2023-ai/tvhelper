@@ -22,3 +22,6 @@ Thumbs.db
 
 # Kotlin
 .kotlin/
+
+# 签名配置（含密码，不进仓库）
+keystore.properties

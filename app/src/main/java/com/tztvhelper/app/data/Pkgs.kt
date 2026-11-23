@@ -1,4 +1,4 @@
-package com.tvhelper.app
+package com.tztvhelper.app.data
 
 /** 让包名好懂一点：常见电视应用的中文名 */
 object Pkgs {

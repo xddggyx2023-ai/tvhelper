@@ -1,4 +1,10 @@
-package com.tvhelper.app
+package com.tztvhelper.app.ui
+
+import com.tztvhelper.app.core.adb.Adb
+import com.tztvhelper.app.core.adb.AppEntry
+import com.tztvhelper.app.core.adb.DeviceInfo
+import com.tztvhelper.app.core.discovery.Net
+import com.tztvhelper.app.data.Pkgs
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -224,7 +230,7 @@ private fun HomeScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("电视助手", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text("兔子电视助手", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
         Text(
             "手机和电视连同一个 Wi-Fi，先打开电视上的 ADB 调试，再点下面的按钮。",
             color = Color(0xFFA9B6CC), fontSize = 14.sp

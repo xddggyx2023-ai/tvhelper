@@ -1,4 +1,4 @@
-package com.tvhelper.app
+package com.tztvhelper.app.core.discovery
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
