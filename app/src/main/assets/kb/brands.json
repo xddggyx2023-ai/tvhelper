@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "kbVersion": "2026.11.23-a",
+  "brands": [
+    { "id": "xiaomi", "name": "小米", "aliases": ["Xiaomi", "Redmi", "红米", "米家"], "models": [] },
+    { "id": "changhong", "name": "长虹", "aliases": ["CHANGHONG", "长虹电视"], "models": [] },
+    { "id": "hisense", "name": "海信", "aliases": ["Hisense", "VIDAA", "聚好看"], "models": [] },
+    { "id": "tcl", "name": "TCL", "aliases": ["TCL", "雷鸟", "FFALCON"], "models": [] },
+    { "id": "skyworth", "name": "创维", "aliases": ["Skyworth", "酷开", "coocaa"], "models": [] },
+    { "id": "sony", "name": "索尼", "aliases": ["Sony", "BRAVIA"], "models": [] },
+    { "id": "huawei", "name": "华为", "aliases": ["HUAWEI", "智慧屏", "HarmonyOS"], "models": [] }
+  ]
+}

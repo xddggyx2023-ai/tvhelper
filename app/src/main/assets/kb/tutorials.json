@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "collectedAt": 1763900000000,
+  "tutorials": [
+    {
+      "id": "tut-xiaomi-generic",
+      "brandId": "xiaomi",
+      "title": "小米 / Redmi 电视：打开 ADB 调试",
+      "scope": "brand",
+      "confidence": "UNVERIFIED",
+      "notes": "小米电视不同年份的固件菜单位置有差别：有的在「账号与安全」，有的在「更多设置 → 开发者选项」。找不到时先用遥控器进「设置 → 关于」把版本号连点 7 次，再回上一级找「开发者选项」。",
+      "sources": [
+        { "type": "UNKNOWN", "url": "", "title": "内置资料整理（未附原始链接）", "collectedAt": 1763900000000, "credibility": "UNVERIFIED" }
+      ],
+      "steps": [
+        { "n": 1, "title": "打开电视设置", "detail": "用遥控器按「菜单」或「主页」旁边的齿轮键，进入设置。", "path": ["设置"], "note": "" },
+        { "n": 2, "title": "进入账号与安全", "detail": "在设置里找「账号与安全」；没有这一项就找「更多设置」。", "path": ["设置", "账号与安全"], "note": "不同固件这一步名称可能是「系统与安全」" },
+        { "n": 3, "title": "打开 ADB 调试", "detail": "把「ADB 调试」开关打开。弹出提示时选择「允许」。", "path": ["设置", "账号与安全", "ADB 调试"], "note": "" },
+        { "n": 4, "title": "记下电视的 IP", "detail": "进「设置 → 关于 → 网络信息」，把 IP 地址记下来（形如 192.168.1.23）。", "path": ["设置", "关于", "网络信息"], "note": "" },
+        { "n": 5, "title": "回到 APP 点检测", "detail": "手机连同一个 Wi-Fi，回到 APP 点「开好了，开始检测」。", "path": [], "note": "首次连接时电视上会弹出「允许 USB 调试吗」，必须用遥控器点允许" }
+      ]
+    },
+    {
+      "id": "tut-changhong-generic",
+      "brandId": "changhong",
+      "title": "长虹电视：打开 ADB 调试",
+      "scope": "brand",
+      "confidence": "UNVERIFIED",
+      "notes": "长虹机型差异较大：部分机型在「设置 → 系统 → 开发者选项」；部分老机型需要进工厂菜单（遥控器输入特定按键序列），不同批次序列不同，未核实前不要随意按，避免改坏画面参数。",
+      "sources": [
+        { "type": "UNKNOWN", "url": "", "title": "内置资料整理（未附原始链接）", "collectedAt": 1763900000000, "credibility": "UNVERIFIED" }
+      ],
+      "steps": [
+        { "n": 1, "title": "打开电视设置", "detail": "遥控器进入「设置」。", "path": ["设置"], "note": "" },
+        { "n": 2, "title": "找系统 / 关于", "detail": "进入「系统」或「关于本机」，找到「版本号」。", "path": ["设置", "系统", "关于本机"], "note": "" },
+        { "n": 3, "title": "连点版本号", "detail": "用遥控器对着「版本号」连按 5～7 次，直到提示「已进入开发者模式」。", "path": ["设置", "系统", "关于本机", "版本号"], "note": "有的系统提示语是「您已处于开发者模式」" },
+        { "n": 4, "title": "打开开发者选项里的调试开关", "detail": "返回上一级，进入「开发者选项」，打开「USB 调试」或「ADB 调试」。", "path": ["设置", "系统", "开发者选项"], "note": "如果只有「USB 调试」，用 ADB 网络连接需要电视支持网络调试，见下一步" },
+        { "n": 5, "title": "确认网络调试", "detail": "部分长虹机型在开发者选项里还有「网络调试 / ADB over network」，一并打开。", "path": ["设置", "系统", "开发者选项", "网络调试"], "note": "找不到网络调试时，APP 会走全端口扫描帮你确认电视是否真的在监听" }
+      ]
+    },
+    {
+      "id": "tut-hisense-generic",
+      "brandId": "hisense",
+      "title": "海信 / VIDAA 电视：打开 ADB 调试",
+      "scope": "brand",
+      "confidence": "UNVERIFIED",
+      "notes": "海信用 VIDAA 系统的机型不一定开放 ADB 开关；部分机型只有「USB 调试」，需要在电视上安装开发者相关应用后才能开网络调试。这类情况先按教程试，失败后走「全端口扫描」确认。",
+      "sources": [
+        { "type": "UNKNOWN", "url": "", "title": "内置资料整理（未附原始链接）", "collectedAt": 1763900000000, "credibility": "UNVERIFIED" }
+      ],
+      "steps": [
+        { "n": 1, "title": "进入设置", "detail": "遥控器按「设置」键。", "path": ["设置"], "note": "" },
+        { "n": 2, "title": "打开开发者选项", "detail": "进入「系统设置 → 开发者选项」；没有这一项就先到「关于」连点版本号。", "path": ["设置", "系统设置", "开发者选项"], "note": "" },
+        { "n": 3, "title": "打开调试开关", "detail": "打开「USB 调试」，有「网络调试 / ADB」的也一起打开。", "path": ["设置", "系统设置", "开发者选项", "USB 调试"], "note": "" },
+        { "n": 4, "title": "确认电视 IP", "detail": "在「网络设置 → 网络信息」里看 IP。", "path": ["设置", "网络设置", "网络信息"], "note": "" }
+      ]
+    },
+    {
+      "id": "tut-tcl-generic",
+      "brandId": "tcl",
+      "title": "TCL / 雷鸟电视：打开 ADB 调试",
+      "scope": "brand",
+      "confidence": "UNVERIFIED",
+      "notes": "TCL 与雷鸟（FFALCON）系统相近。开发者选项默认隐藏，需要在「关于」里连点版本号才会出现。",
+      "sources": [
+        { "type": "UNKNOWN", "url": "", "title": "内置资料整理（未附原始链接）", "collectedAt": 1763900000000, "credibility": "UNVERIFIED" }
+      ],
+      "steps": [
+        { "n": 1, "title": "进入设置 → 关于", "detail": "遥控器进「设置」，找「系统」或「关于」。", "path": ["设置", "系统", "关于"], "note": "" },
+        { "n": 2, "title": "连点版本号", "detail": "对着「版本号」连按 5～7 次，提示开发者模式已开启。", "path": ["设置", "系统", "关于", "版本号"], "note": "" },
+        { "n": 3, "title": "打开 USB / 网络调试", "detail": "返回「设置 → 系统 → 开发者选项」，打开「USB 调试」。", "path": ["设置", "系统", "开发者选项", "USB 调试"], "note": "" },
+        { "n": 4, "title": "记下 IP", "detail": "「设置 → 网络 → 网络信息」查看 IP。", "path": ["设置", "网络", "网络信息"], "note": "" }
+      ]
+    },
+    {
+      "id": "tut-skyworth-generic",
+      "brandId": "skyworth",
+      "title": "创维 / 酷开电视：打开 ADB 调试",
+      "scope": "brand",
+      "confidence": "UNVERIFIED",
+      "notes": "创维与酷开（coocaa）系统不同。酷开部分机型把 ADB 开关藏在工厂菜单，常见进入方式是遥控器依次按「上上下下左右左右」，但不同批次不一样，未核实前不建议盲试；先走设置里的开发者选项。",
+      "sources": [
+        { "type": "UNKNOWN", "url": "", "title": "内置资料整理（未附原始链接）", "collectedAt": 1763900000000, "credibility": "UNVERIFIED" }
+      ],
+      "steps": [
+        { "n": 1, "title": "进入设置", "detail": "遥控器进「设置」→「系统设置」→「通用设置」。", "path": ["设置", "系统设置", "通用设置"], "note": "" },
+        { "n": 2, "title": "找开发者选项", "detail": "在通用设置底部找「开发者选项」；没有就先到「关于本机」连点版本号。", "path": ["设置", "系统设置", "通用设置", "开发者选项"], "note": "" },
+        { "n": 3, "title": "打开 ADB", "detail": "打开「USB 调试 / ADB 调试」。", "path": ["设置", "系统设置", "通用设置", "开发者选项", "USB 调试"], "note": "" },
+        { "n": 4, "title": "记下 IP", "detail": "「设置 → 网络设置 → 网络信息」查看 IP。", "path": ["设置", "网络设置", "网络信息"], "note": "" }
+      ]
+    },
+    {
+      "id": "tut-sony-generic",
+      "brandId": "sony",
+      "title": "索尼 BRAVIA（Android TV / Google TV）：打开 ADB 调试",
+      "scope": "brand",
+      "confidence": "UNVERIFIED",
+      "notes": "索尼 Android TV 的路径与原生 Android 一致；Google TV 系统（较新机型）菜单名略有不同，但「关于 → 版本号连点」的入口一样。",
+      "sources": [
+        { "type": "UNKNOWN", "url": "", "title": "内置资料整理（未附原始链接）", "collectedAt": 1763900000000, "credibility": "UNVERIFIED" }
+      ],
+      "steps": [
+        { "n": 1, "title": "进入设置 → 系统 → 关于", "detail": "遥控器按「主页」，进「设置」→「系统」→「关于」。", "path": ["设置", "系统", "关于"], "note": "" },
+        { "n": 2, "title": "连点版本号 7 次", "detail": "对着「版本」连按 7 次，提示「您已成为开发者」。", "path": ["设置", "系统", "关于", "版本"], "note": "" },
+        { "n": 3, "title": "打开网络调试", "detail": "返回「设置 → 系统 → 开发者选项」，打开「USB 调试」，并打开「网络调试 / ADB over network」（有的话）。", "path": ["设置", "系统", "开发者选项", "USB 调试"], "note": "索尼部分机型打开网络调试后每次重启要重新确认" },
+        { "n": 4, "title": "查看 IP", "detail": "「设置 → 网络和互联网 → 网络状态」查看 IP。", "path": ["设置", "网络和互联网", "网络状态"], "note": "" }
+      ]
+    },
+    {
+      "id": "tut-huawei-generic",
+      "brandId": "huawei",
+      "title": "华为智慧屏：打开 ADB 调试",
+      "scope": "brand",
+      "confidence": "UNVERIFIED",
+      "notes": "华为智慧屏分为鸿蒙（HarmonyOS）和早期 Android 版本，两者菜单不同。鸿蒙版本对 ADB 支持有限，部分型号只能通过 USB 调试且需要华为账号登录；未核实前不要在电视上安装来源不明的工具。",
+      "sources": [
+        { "type": "UNKNOWN", "url": "", "title": "内置资料整理（未附原始链接）", "collectedAt": 1763900000000, "credibility": "UNVERIFIED" }
+      ],
+      "steps": [
+        { "n": 1, "title": "进入设置 → 关于", "detail": "遥控器进「设置」→「系统和更新」→「关于」。", "path": ["设置", "系统和更新", "关于"], "note": "" },
+        { "n": 2, "title": "连点版本号", "detail": "对着版本号连按 7 次，开启开发者模式。", "path": ["设置", "系统和更新", "关于", "版本号"], "note": "" },
+        { "n": 3, "title": "找开发者选项", "detail": "返回「系统和更新 → 开发者选项」，打开「USB 调试」。", "path": ["设置", "系统和更新", "开发者选项", "USB 调试"], "note": "鸿蒙版本可能没有网络调试选项" },
+        { "n": 4, "title": "记下 IP", "detail": "「设置 → 网络 → 网络信息」查看 IP。", "path": ["设置", "网络", "网络信息"], "note": "" }
+      ]
+    }
+  ]
+}

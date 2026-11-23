@@ -171,7 +171,10 @@ private fun App() {
             onManualIpChange = { manualIp = it },
             onScan = ::startScan,
             onConnect = ::startConnect,
-            message = message
+            message = message,
+            onOpenGuide = {
+                ctx.startActivity(android.content.Intent(ctx, GuideActivity::class.java))
+            }
         )
 
         Screen.CONNECTING -> ConnectingScreen(
@@ -221,7 +224,8 @@ private fun HomeScreen(
     onManualIpChange: (String) -> Unit,
     onScan: () -> Unit,
     onConnect: (String) -> Unit,
-    message: String
+    message: String,
+    onOpenGuide: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -235,6 +239,15 @@ private fun HomeScreen(
             "手机和电视连同一个 Wi-Fi，先打开电视上的 ADB 调试，再点下面的按钮。",
             color = Color(0xFFA9B6CC), fontSize = 14.sp
         )
+
+        OutlinedButton(
+            onClick = onOpenGuide,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+        ) {
+            Text("不知道 ADB 怎么开？看开启教程", fontSize = 15.sp)
+        }
 
         Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -316,8 +329,8 @@ private fun HomeScreen(
 
         Spacer(Modifier.height(8.dp))
         Text(
-            "提示：电视上的 ADB 开关各品牌位置不一样。小米在“账号与安全”，" +
-                "TCL/雷鸟在“本机信息”里按上下左右，创维/酷开在工厂菜单里。",
+            "提示：各品牌 ADB 开关位置不一样，点上面的「开启教程」按你的品牌查；" +
+                "教程里没有的型号可以在教程页反馈，后续补充。",
             color = Color(0xFF8794AB),
             fontSize = 12.sp
         )
