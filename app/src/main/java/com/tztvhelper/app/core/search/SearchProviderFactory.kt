@@ -15,7 +15,9 @@ object SearchProviderFactory {
     fun create(ctx: Context): SearchProvider {
         val base = AppConfig.searchBaseUrl(ctx)
         if (base.isNotBlank()) {
-            return HttpSearchProvider(base, AppConfig.searchToken(ctx))
+            // 明文 HTTP 不携带令牌（协议层也会再拦一次）
+            val token = AppConfig.searchToken(ctx).takeIf { SearchGuards.maySendToken(base) }
+            return HttpSearchProvider(base, token)
         }
         return if (BuildConfig.DEBUG) {
             MockSearchProvider {
@@ -26,9 +28,14 @@ object SearchProviderFactory {
         }
     }
 
-    fun describe(ctx: Context): String = when {
-        AppConfig.searchBaseUrl(ctx).isNotBlank() -> "已配置搜索服务：${AppConfig.searchBaseUrl(ctx)}"
-        BuildConfig.DEBUG -> "未配置服务器，当前使用本地模拟搜索数据（仅供流程验证，不是真实结果）"
-        else -> "未配置搜索服务：当前只能查本地知识库"
+    fun describe(ctx: Context): String {
+        val base = AppConfig.searchBaseUrl(ctx)
+        return when {
+            base.isNotBlank() && !SearchGuards.maySendToken(base) ->
+                "搜索服务是明文 HTTP（$base）：不会发送令牌，请尽快改成 HTTPS"
+            base.isNotBlank() -> "已配置搜索服务：$base"
+            BuildConfig.DEBUG -> "未配置服务器，当前使用本地模拟搜索数据（仅供流程验证，不是真实结果）"
+            else -> "未配置搜索服务：当前只能查本地知识库"
+        }
     }
 }

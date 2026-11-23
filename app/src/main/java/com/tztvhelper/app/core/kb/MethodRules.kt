@@ -50,39 +50,20 @@ object MethodRules {
     /**
      * 同一(品牌,型号)下选出要展示的方法：
      * 推荐 > 待复核 > 候选；同档按成功次数降序。
+     * REJECTED 一律不参与——历史记录留在库里，但不再展示给用户。
      */
     fun pickBest(candidates: List<Method>): Method? =
-        candidates.maxWithOrNull(
-            compareBy<Method> { rank(it.status) }
-                .thenBy { it.successCount }
-                .thenBy { -it.failCount }
-        )
+        candidates.filter { it.status != MethodStatus.REJECTED }
+            .maxWithOrNull(
+                compareBy<Method> { rank(it.status) }
+                    .thenBy { it.successCount }
+                    .thenBy { -it.failCount }
+            )
 
     private fun rank(s: MethodStatus): Int = when (s) {
         MethodStatus.RECOMMENDED -> 4
         MethodStatus.NEEDS_REVIEW -> 3
         MethodStatus.CANDIDATE -> 2
-        MethodStatus.REJECTED -> 1
-    }
-
-    /**
-     * 匹配评分：型号+系统版本 > 仅型号 > 品牌通用 > 不匹配。
-     * 版本比较用"包含"而不是精确相等，因为用户填的常是 8.1、9、10 这种。
-     */
-    fun score(method: Method, modelId: String?, osVersion: String?): Int = when {
-        method.modelId != null && modelId != null && method.modelId == modelId -> {
-            if (osVersion != null && matchesOs(method, osVersion)) 100 else 80
-        }
-        method.modelId == null && method.scope == "brand" -> 40
-        else -> 0
-    }
-
-    private fun matchesOs(m: Method, osVersion: String): Boolean {
-        val min = m.osMin?.toDoubleOrNull()
-        val max = m.osMax?.toDoubleOrNull()
-        val v = osVersion.toDoubleOrNull() ?: return true // 解析不了就不筛，避免误杀
-        if (min != null && v < min) return false
-        if (max != null && v > max) return false
-        return true
+        MethodStatus.REJECTED -> 0
     }
 }

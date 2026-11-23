@@ -15,6 +15,8 @@ interface SearchProvider {
 }
 
 data class SearchQuery(
+    /** 品牌 ID（如 xiaomi）。保存结果时必须用它核对归属，防止跨品牌误存 */
+    val brandId: String,
     val brand: String,
     val model: String?,
     val osVersion: String?,

@@ -9,19 +9,56 @@ import com.tztvhelper.app.core.kb.TutorialStep
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/**
+ * 一次搜索结果，连同"它属于哪台设备"一起保存。
+ * 界面切品牌/型号后，旧结果不能拿来存到新品牌名下。
+ */
 data class SearchOutcome(
+    val query: SearchQuery,
     val response: SearchResponse,
     val fromCache: Boolean,
-    val cacheKey: String,
-    /** 只有真实结果才为 true；模拟数据永远 false */
+    val cacheKey: String
+) {
     val canSaveToKb: Boolean
-)
+        get() = response.error == null && SearchGuards.canWriteToKb(response.isMock)
+}
 
 sealed interface SaveResult {
     data class Saved(val methodId: String) : SaveResult
     data object MockBlocked : SaveResult
     data object NoSteps : SaveResult
+    data object NoHit : SaveResult
+    data object IdentityMismatch : SaveResult
+    data object InvalidUrl : SaveResult
     data class Failed(val reason: String) : SaveResult
+}
+
+/** 纯函数：保存前的全部校验，界面藏按钮不能替代它 */
+object SearchSaveGuard {
+
+    enum class Problem { RESPONSE_ERROR, MOCK, IDENTITY_MISMATCH, NO_HIT, INVALID_URL, NO_STEPS }
+
+    fun check(
+        outcome: SearchOutcome,
+        brandId: String,
+        model: String?,
+        osVersion: String?,
+        hitIndex: Int
+    ): Problem? {
+        val r = outcome.response
+        if (r.error != null) return Problem.RESPONSE_ERROR
+        if (r.isMock) return Problem.MOCK
+        if (!SearchGuards.identityMatches(
+                outcome.query.brandId, outcome.query.model, outcome.query.osVersion,
+                brandId, model, osVersion
+            )
+        ) return Problem.IDENTITY_MISMATCH
+
+        val hit = r.hits.getOrNull(hitIndex) ?: return Problem.NO_HIT
+        if (!SearchGuards.isValidHttpUrl(hit.url)) return Problem.INVALID_URL
+        if (hit.extractedSteps.isEmpty()) return Problem.NO_STEPS
+        return null
+    }
 }
 
 /**
@@ -37,18 +74,18 @@ class SearchService(
 ) {
 
     suspend fun search(query: SearchQuery): SearchOutcome = withContext(Dispatchers.IO) {
-        val key = SearchGuards.cacheKey(query.brand, query.model, query.osVersion)
+        val key = SearchGuards.cacheKey(query.brandId, query.brand, query.model, query.osVersion)
         val now = System.currentTimeMillis()
 
         db.cacheGet(key)?.let { cached ->
             if (SearchGuards.isFresh(cached.createdAt, ttlMs, now)) {
                 val parsed = runCatching { decodeSearchResponse(cached.payload, cached.provider) }.getOrNull()
-                if (parsed != null) {
+                if (parsed != null && parsed.error == null) {
                     return@withContext SearchOutcome(
+                        query = query,
                         response = parsed,
                         fromCache = true,
-                        cacheKey = key,
-                        canSaveToKb = SearchGuards.canWriteToKb(parsed.isMock)
+                        cacheKey = key
                     )
                 }
             }
@@ -76,45 +113,54 @@ class SearchService(
                 }
             )
         }
-        SearchOutcome(resp, fromCache = false, cacheKey = key, canSaveToKb = SearchGuards.canWriteToKb(resp.isMock))
+        SearchOutcome(query = query, response = resp, fromCache = false, cacheKey = key)
     }
 
     /**
-     * 把选中的搜索结果转成"候选方法"入库。
-     * 硬规则：模拟数据不许入库；没有步骤的不入库（避免空教程）。
+     * 把用户明确选中的那一条结果转成"候选方法"。
+     * 硬规则（服务层自己校验，不依赖界面）：
+     * - 失败响应、模拟数据、跨品牌/跨型号、无效链接、没有步骤，一律拒绝。
      */
     fun saveAsCandidate(
         outcome: SearchOutcome,
         brandId: String,
         modelId: String?,
+        modelText: String?,
+        osVersion: String?,
+        hitIndex: Int,
         title: String
-    ): SaveResult {
-        if (!outcome.canSaveToKb) return SaveResult.MockBlocked
-        val hit = outcome.response.hits.firstOrNull() ?: return SaveResult.NoSteps
-        if (hit.extractedSteps.isEmpty()) return SaveResult.NoSteps
-
-        val steps = hit.extractedSteps.mapIndexed { i, s ->
-            TutorialStep(n = i + 1, title = "第 ${i + 1} 步", detail = s, note = "来源：${hit.url}")
-        }
-        val sources = outcome.response.hits.map {
-            SourceRef(
-                type = it.sourceType,
-                url = it.url,
-                title = it.title,
-                collectedAt = it.fetchedAt,
-                credibility = it.credibility
+    ): SaveResult = when (val problem = SearchSaveGuard.check(outcome, brandId, modelText, osVersion, hitIndex)) {
+        SearchSaveGuard.Problem.RESPONSE_ERROR ->
+            SaveResult.Failed("这次搜索本身失败了（${outcome.response.error}），不能入库")
+        SearchSaveGuard.Problem.MOCK -> SaveResult.MockBlocked
+        SearchSaveGuard.Problem.IDENTITY_MISMATCH -> SaveResult.IdentityMismatch
+        SearchSaveGuard.Problem.NO_HIT -> SaveResult.NoHit
+        SearchSaveGuard.Problem.INVALID_URL -> SaveResult.InvalidUrl
+        SearchSaveGuard.Problem.NO_STEPS -> SaveResult.NoSteps
+        null -> {
+            val hit = outcome.response.hits[hitIndex]
+            val steps = hit.extractedSteps.mapIndexed { i, s ->
+                TutorialStep(n = i + 1, title = "第 ${i + 1} 步", detail = s, note = "来源：${hit.url}")
+            }
+            val method = repo.addCandidate(
+                brandId = brandId,
+                modelId = modelId,
+                title = title.ifBlank { hit.title },
+                steps = steps,
+                notes = "由搜索结果整理，未经实机验证；原文摘要：${hit.snippet}",
+                confidence = hit.credibility.takeIf { it != Credibility.UNVERIFIED } ?: Credibility.UNVERIFIED,
+                sources = listOf(
+                    SourceRef(
+                        type = hit.sourceType,
+                        url = hit.url,
+                        title = hit.title,
+                        collectedAt = hit.fetchedAt,
+                        credibility = hit.credibility
+                    )
+                )
             )
+            SaveResult.Saved(method.id)
         }
-        val method = repo.addCandidate(
-            brandId = brandId,
-            modelId = modelId,
-            title = title.ifBlank { hit.title },
-            steps = steps,
-            notes = "由搜索结果整理，未经实机验证；原文摘要：${hit.snippet}",
-            confidence = hit.credibility.takeIf { it != Credibility.UNVERIFIED } ?: Credibility.UNVERIFIED,
-            sources = sources
-        )
-        return SaveResult.Saved(method.id)
     }
 
     companion object {

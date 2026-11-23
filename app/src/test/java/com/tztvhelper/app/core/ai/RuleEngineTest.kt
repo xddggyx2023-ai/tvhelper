@@ -33,6 +33,7 @@ class RuleEngineTest {
 
     private fun engine(result: MatchResult) = RuleEngine(object : TutorialLookup {
         override fun find(brandId: String?, modelId: String?, osVersion: String?) = result
+        override fun resolveModelId(brandId: String?, modelText: String?): String? = null
     })
 
     @Test
@@ -100,6 +101,29 @@ class RuleEngineTest {
         assertTrue(a.steps.isEmpty())
         assertTrue(a.text.contains("没有"))
         assertTrue(a.text.contains("不会凭空编"))
+    }
+
+    @Test
+    fun `型号文本先解析成型号 ID 再查库`() {
+        var gotModelId: String? = "unset"
+        val e = RuleEngine(object : TutorialLookup {
+            override fun find(brandId: String?, modelId: String?, osVersion: String?): MatchResult {
+                gotModelId = modelId
+                return MatchResult.NotFound(brandId, modelId)
+            }
+
+            override fun resolveModelId(brandId: String?, modelText: String?): String? = "mi-4a"
+        })
+        e.answer("怎么开 ADB", profile)
+        assertEquals("mi-4a", gotModelId)
+    }
+
+    @Test
+    fun `没有型号专属教程时明确说是品牌通用`() {
+        val a = engine(MatchResult.Hit(method(MethodStatus.CANDIDATE), MatchLevel.BRAND_GENERIC, "x"))
+            .answer("怎么开 ADB", profile)
+        assertTrue(a.text.contains("品牌通用方法"))
+        assertEquals(AnswerConfidence.KB_CANDIDATE, a.confidence)
     }
 
     @Test

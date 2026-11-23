@@ -1,6 +1,7 @@
 package com.tztvhelper.app.core.kb
 
 import android.content.Context
+import com.tztvhelper.app.core.adb.AdbConnectionOracle
 import com.tztvhelper.app.core.ai.TutorialLookup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -17,7 +18,10 @@ import org.json.JSONObject
  * 2. 每次成功/失败都留记录，历史只增不删。
  * 3. 匹配顺序：型号+版本 → 型号 → 品牌通用 → 没有。
  */
-class KbRepository(private val context: Context) : TutorialLookup {
+class KbRepository(
+    private val context: Context,
+    private val oracle: ConnectionOracle = AdbConnectionOracle
+) : TutorialLookup {
 
     /** 搜索缓存等模块复用同一个数据库实例 */
     fun database(): KbDatabase = db
@@ -100,24 +104,27 @@ class KbRepository(private val context: Context) : TutorialLookup {
     fun brands(): List<Brand> = db.brands()
     fun models(brandId: String): List<TvModel> = db.models(brandId)
 
-    /** 按 型号+版本 → 型号 → 品牌通用 的顺序找方法 */
+    /** 手输型号 → 库内型号 ID。匹配不唯一或无匹配就返回 null（界面显示"品牌通用"） */
+    fun resolveModel(brandId: String, modelText: String?): TvModel? {
+        if (modelText.isNullOrBlank()) return null
+        val brand = db.brands().firstOrNull { it.id == brandId } ?: return null
+        return ModelMatcher.match(db.models(brandId), modelText, brand.name)
+    }
+
+    override fun resolveModelId(brandId: String?, modelText: String?): String? {
+        if (brandId.isNullOrBlank()) return null
+        return resolveModel(brandId, modelText)?.id
+    }
+
+    /** 按 型号+版本 → 型号 → 品牌通用 的顺序找可用方法；REJECTED 不参与 */
     override fun find(brandId: String?, modelId: String?, osVersion: String?): MatchResult {
         if (brandId.isNullOrBlank()) return MatchResult.NotFound(null, modelId)
         val all = db.methodsFor(brandId, modelId)
         if (all.isEmpty()) return MatchResult.NotFound(brandId, modelId)
 
-        val scored = all.map { it to MethodRules.score(it, modelId, osVersion) }.filter { it.second > 0 }
-        val best = scored.maxByOrNull { it.second } ?: return MatchResult.NotFound(brandId, modelId)
-        val chosen = MethodRules.pickBest(
-            scored.filter { it.second == best.second }.map { it.first }
-        ) ?: return MatchResult.NotFound(brandId, modelId)
-
-        val level = when {
-            best.second >= 80 && chosen.modelId != null -> MatchLevel.MODEL
-            best.second == 40 -> MatchLevel.BRAND_GENERIC
-            else -> MatchLevel.MODEL
-        }
-        return MatchResult.Hit(chosen, level, "匹配分 ${best.second}")
+        val pick = MatchPicker.pick(all, modelId, osVersion)
+            ?: return MatchResult.NotFound(brandId, modelId)
+        return MatchResult.Hit(pick.method, pick.level, "匹配分 ${pick.score}")
     }
 
     /** 搜索结果/用户反馈进来的新方法：一律候选 */
@@ -151,8 +158,10 @@ class KbRepository(private val context: Context) : TutorialLookup {
     }
 
     /**
-     * 记录一次验证。成功次数只增不减；失败不清零成功记录。
-     * 返回更新后的方法（供界面立即刷新状态）。
+     * 记录一次验证。
+     * - SUCCESS_APP 必须由 [ConnectionOracle] 证实真的连着，否则整条拒绝（返回 null，不写库）。
+     * - 成功次数只增不减；失败不清零成功记录。
+     * - 失败原因留空时固定记为「未提供原因」，不允许空白。
      */
     fun recordVerification(
         methodId: String,
@@ -162,25 +171,29 @@ class KbRepository(private val context: Context) : TutorialLookup {
         reason: String?
     ): Method? {
         val current = db.method(methodId) ?: return null
+        val effective = VerificationRules.effectiveResult(result, oracle) ?: return null
         val now = System.currentTimeMillis()
-        val updated = MethodRules.afterVerification(current, result, now)
+        val updated = MethodRules.afterVerification(current, effective, now)
 
         db.upsertMethod(updated)
-        db.insertVerification(Verification(methodId, result, osVersion, deviceModel, reason, now))
+        db.insertVerification(
+            Verification(
+                methodId, effective, osVersion,
+                deviceModel?.takeIf { it.isNotBlank() } ?: oracle.deviceModel(),
+                reason?.let { VerificationRules.normalizeReason(it) },
+                now
+            )
+        )
 
         val change = when {
-            result == VerifyResult.FAILURE && current.status == MethodStatus.RECOMMENDED -> "DEMOTED"
+            effective == VerifyResult.FAILURE && current.status == MethodStatus.RECOMMENDED -> "DEMOTED"
             updated.status == MethodStatus.RECOMMENDED && current.status != MethodStatus.RECOMMENDED -> "PROMOTED"
-            result == VerifyResult.FAILURE -> "FAILED"
+            effective == VerifyResult.FAILURE -> "FAILED"
             else -> "VERIFIED"
         }
-        val detail = buildString {
-            append("结果=").append(result.name)
-            osVersion?.let { append("，系统=").append(it) }
-            deviceModel?.let { append("，机型=").append(it) }
-            reason?.let { append("，原因=").append(it) }
-            append("；累计成功=").append(updated.successCount).append("，失败=").append(updated.failCount)
-        }
+        val detail = VerificationRules.historyDetail(
+            effective, osVersion, deviceModel, reason, updated.successCount, updated.failCount
+        )
         db.insertHistory(MethodHistory(methodId, change, detail, now))
         return updated
     }

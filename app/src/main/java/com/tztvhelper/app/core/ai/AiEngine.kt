@@ -57,6 +57,9 @@ data class AiAnswer(
 /** 让规则引擎能查到知识库，又不用依赖 Android。测试里可以塞假数据。 */
 interface TutorialLookup {
     fun find(brandId: String?, modelId: String?, osVersion: String?): MatchResult
+
+    /** 用户手输型号 → 库内型号 ID；无法唯一确定时返回 null */
+    fun resolveModelId(brandId: String?, modelText: String?): String?
 }
 
 interface AiEngine {

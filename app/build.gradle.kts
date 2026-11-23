@@ -14,8 +14,8 @@ android {
         applicationId = "com.tztvhelper.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.4.1"
 
         // 搜索服务地址：留空表示未部署；部署后改这里或运行时用 AppConfig.setSearchBaseUrl 覆盖
         buildConfigField("String", "SEARCH_BASE_URL", "\"\"")
@@ -92,4 +92,6 @@ dependencies {
     implementation("com.flyfishxu:kadb:2.1.1")
 
     testImplementation("junit:junit:4.13.2")
+    // 单测里跑真实的 org.json（Android 自带的只是桩，不能用于解析测试）
+    testImplementation("org.json:json:20240303")
 }

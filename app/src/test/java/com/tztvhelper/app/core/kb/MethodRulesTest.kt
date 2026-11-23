@@ -79,16 +79,23 @@ class MethodRulesTest {
         val brandGeneric = method()
         val modelExact = method(modelId = "mi4a", scope = "model").copy(osMin = "8.0", osMax = "9.9")
         assertTrue(
-            MethodRules.score(modelExact, "mi4a", "9.0") >
-                MethodRules.score(brandGeneric, "mi4a", "9.0")
+            MatchPicker.score(modelExact, "mi4a", "9.0")!! >
+                MatchPicker.score(brandGeneric, "mi4a", "9.0")!!
         )
     }
 
     @Test
-    fun `版本不在范围内时精确型号仍高于品牌通用`() {
+    fun `版本不在范围内的型号方法直接判定不适用`() {
+        // 系统 11 的电视不能套用只覆盖 8.x 的教程
         val outOfRange = method(modelId = "mi4a", scope = "model").copy(osMin = "8.0", osMax = "9.9")
         val brandGeneric = method()
-        assertEquals(80, MethodRules.score(outOfRange, "mi4a", "11"))
-        assertEquals(40, MethodRules.score(brandGeneric, "mi4a", "11"))
+        assertEquals(null, MatchPicker.score(outOfRange, "mi4a", "11"))
+        assertEquals(40, MatchPicker.score(brandGeneric, "mi4a", "11"))
+    }
+
+    @Test
+    fun `已否决的方法不参与选择`() {
+        val rejected = method(status = MethodStatus.REJECTED, success = 5)
+        assertEquals(null, MethodRules.pickBest(listOf(rejected)))
     }
 }

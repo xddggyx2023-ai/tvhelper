@@ -37,7 +37,10 @@ class HttpSearchProvider(
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Accept", "application/json")
                 apiToken?.takeIf { it.isNotBlank() }?.let {
-                    setRequestProperty("Authorization", "Bearer $it")
+                    // 明文 HTTP 绝不携带令牌，避免令牌在链路上裸奔
+                    if (SearchGuards.maySendToken(baseUrl)) {
+                        setRequestProperty("Authorization", "Bearer $it")
+                    }
                 }
             }
             conn.outputStream.use { it.write(query.toJson().toByteArray(Charsets.UTF_8)) }

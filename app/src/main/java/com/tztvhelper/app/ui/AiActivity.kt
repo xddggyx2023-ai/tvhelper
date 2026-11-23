@@ -3,6 +3,7 @@ package com.tztvhelper.app.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,6 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tztvhelper.app.core.AppConfig
 import com.tztvhelper.app.core.ai.AiAction
 import com.tztvhelper.app.core.ai.AiAnswer
 import com.tztvhelper.app.core.ai.AnswerConfidence
@@ -49,10 +52,18 @@ import com.tztvhelper.app.core.ai.RuleEngine
 import com.tztvhelper.app.core.kb.Brand
 import com.tztvhelper.app.core.kb.KbRepository
 import com.tztvhelper.app.core.profile.DeviceProfileStore
+import com.tztvhelper.app.core.search.SaveResult
+import com.tztvhelper.app.core.search.SearchError
+import com.tztvhelper.app.core.search.SearchOutcome
 import com.tztvhelper.app.core.search.SearchProviderFactory
+import com.tztvhelper.app.core.search.SearchQuery
+import com.tztvhelper.app.core.search.SearchService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private val ABg = Color(0xFF0B1220)
 private val ACard = Color(0xFF16213A)
@@ -152,7 +163,7 @@ private fun AiScreen(onBack: () -> Unit, onOpenGuide: () -> Unit) {
 
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3A2A12))) {
             Text(
-                "本地规则问答 · 不联网 · 不是大模型。$searchStatus",
+                "回答由本地规则生成 · 不联网 · 不是大模型。$searchStatus",
                 color = AWarn, fontSize = 12.sp, modifier = Modifier.padding(10.dp)
             )
         }
@@ -255,6 +266,12 @@ private fun AiScreen(onBack: () -> Unit, onOpenGuide: () -> Unit) {
                             if (a.actions.contains(AiAction.OPEN_GUIDE)) {
                                 OutlinedButton(onClick = onOpenGuide) { Text("打开教程页", fontSize = 13.sp) }
                             }
+
+                            // 本地库没有答案时，才给"单独发起一次搜索"的入口；
+                            // 搜索不是大模型自动完成的，必须由用户点、用户选结果。
+                            if (a.confidence == AnswerConfidence.NO_KB && profile.brandId != null) {
+                                AiSearchBlock(profile = profile, repo = repo)
+                            }
                         }
                     }
                 }
@@ -272,10 +289,147 @@ private fun AiScreen(onBack: () -> Unit, onOpenGuide: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "提示：这里的回答只依据本地知识库和固定说明；没有联网搜索，也没有云端大模型。",
+            "提示：回答只依据本地知识库和固定说明；知识库没有教程时，可以点答案里的搜索按钮单独搜一次。" +
+                "搜到的是网上原始资料，不是 AI 验证过的教程。",
             color = Color(0xFF8794AB), fontSize = 11.sp
         )
     }
+}
+
+/**
+ * 知识库没答案时，用户手动发起的一次搜索。
+ * 明确：不是大模型自动联网；结果要用户自己挑，存进去也只是"候选"。
+ */
+@Composable
+private fun AiSearchBlock(profile: DeviceProfile, repo: KbRepository) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var outcome by remember { mutableStateOf<SearchOutcome?>(null) }
+    var selected by remember { mutableStateOf<Int?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf("") }
+    val brandId = profile.brandId ?: return
+
+    // 换了品牌/型号/版本，旧结果立即作废，避免把小米的结果存到海信名下
+    LaunchedEffect(profile.brandId, profile.model, profile.osVersion) {
+        outcome = null
+        selected = null
+        note = ""
+    }
+
+    fun service() = SearchService(
+        repo.database(), repo,
+        SearchProviderFactory.create(ctx), AppConfig.searchCacheTtlMs(ctx)
+    )
+
+    fun brandName() = repo.brands().firstOrNull { it.id == brandId }?.name ?: brandId
+
+    fun search() {
+        scope.launch {
+            busy = true
+            note = ""
+            selected = null
+            outcome = withContext(Dispatchers.IO) {
+                service().search(
+                    SearchQuery(brandId, brandName(), profile.model, profile.osVersion)
+                )
+            }
+            busy = false
+        }
+    }
+
+    fun save() {
+        val o = outcome ?: return
+        val idx = selected ?: return
+        note = when (
+            val r = service().saveAsCandidate(
+                outcome = o,
+                brandId = brandId,
+                modelId = repo.resolveModel(brandId, profile.model)?.id,
+                modelText = profile.model,
+                osVersion = profile.osVersion,
+                hitIndex = idx,
+                title = "${brandName()} 开启方法（来自搜索）"
+            )
+        ) {
+            is SaveResult.Saved -> "已存为候选方法，编号 ${r.methodId}；验证成功前不会变成推荐。"
+            SaveResult.MockBlocked -> "模拟数据不能写进知识库。"
+            SaveResult.NoSteps -> "这条结果没有步骤，不能存成教程。"
+            SaveResult.NoHit -> "先点选一条结果。"
+            SaveResult.IdentityMismatch -> "搜索条件和当前电视不一致，请重新搜索。"
+            SaveResult.InvalidUrl -> "这条结果的链接不合法，不能入库。"
+            is SaveResult.Failed -> "保存失败：${r.reason}"
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "知识库里没有这个型号的答案。你可以单独发起一次联网搜索——这是搜索按钮，不是大模型自己上网。",
+            color = ADim, fontSize = 12.sp
+        )
+        Button(onClick = { search() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text(if (busy) "搜索中…" else "联网搜索这个型号")
+        }
+
+        val o = outcome
+        if (o != null) {
+            if (o.response.isMock) {
+                Text("模拟数据：只用来验证流程，不是真实结果，不能入库。", color = AWarn, fontSize = 12.sp)
+            }
+            val err = o.response.error
+            if (err != null) {
+                Text(searchErrText(err), color = ABad, fontSize = 12.sp)
+            } else {
+                Text(
+                    "搜索条件：${o.query.brand} ${o.query.model ?: "（未填型号）"}；共 ${o.response.hits.size} 条，点一条再存。",
+                    color = ADim, fontSize = 11.sp
+                )
+                o.response.hits.forEachIndexed { i, h ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { selected = i }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        RadioButton(selected = selected == i, onClick = { selected = i })
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(h.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(h.url, color = AAccent, fontSize = 11.sp)
+                            Text(h.snippet, color = ADim, fontSize = 12.sp)
+                            Text(
+                                "来源：${SearchService.sourceLabel(h.sourceType)} · ${h.credibility.label()} · 抓取 ${timeText(h.fetchedAt)}",
+                                color = Color(0xFF8794AB), fontSize = 11.sp
+                            )
+                            if (h.extractedSteps.isEmpty()) {
+                                Text("这条没有步骤，不能存成教程。", color = AWarn, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+                if (o.canSaveToKb) {
+                    Button(
+                        onClick = { save() },
+                        enabled = selected != null,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("把选中的存为候选（仍需实机验证）", fontSize = 12.sp) }
+                }
+            }
+        }
+        if (note.isNotBlank()) Text(note, color = AWarn, fontSize = 12.sp)
+    }
+}
+
+private fun timeText(ts: Long): String =
+    if (ts <= 0) "-" else SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date(ts))
+
+private fun searchErrText(e: SearchError): String = when (e) {
+    SearchError.NOT_CONFIGURED -> "没有配置搜索服务，只能查本地知识库。"
+    SearchError.NETWORK -> "网络不通：检查网络后再试。"
+    SearchError.TIMEOUT -> "搜索超时：稍后再试。"
+    SearchError.BLOCKED -> "搜索被拦截：服务器被目标站点拦住了。"
+    SearchError.RATE_LIMIT -> "搜索太频繁：过一会儿再试。"
+    SearchError.PARSE_FAILED -> "搜索返回的数据不合格，已拒绝使用。"
 }
 
 private fun AnswerConfidence.label(): String = when (this) {

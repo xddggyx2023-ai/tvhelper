@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -23,6 +25,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tztvhelper.app.core.AppConfig
+import com.tztvhelper.app.core.adb.Adb
 import com.tztvhelper.app.core.kb.Brand
 import com.tztvhelper.app.core.kb.Credibility
 import com.tztvhelper.app.core.kb.KbRepository
@@ -49,6 +53,7 @@ import com.tztvhelper.app.core.kb.MatchLevel
 import com.tztvhelper.app.core.kb.MatchResult
 import com.tztvhelper.app.core.kb.Method
 import com.tztvhelper.app.core.kb.MethodStatus
+import com.tztvhelper.app.core.kb.TvModel
 import com.tztvhelper.app.core.kb.VerifyResult
 import com.tztvhelper.app.core.search.SaveResult
 import com.tztvhelper.app.core.search.SearchError
@@ -57,6 +62,7 @@ import com.tztvhelper.app.core.search.SearchProviderFactory
 import com.tztvhelper.app.core.search.SearchQuery
 import com.tztvhelper.app.core.search.SearchService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -101,13 +107,17 @@ private fun GuideScreen(onBack: () -> Unit) {
     var brand by remember { mutableStateOf<Brand?>(null) }
     var model by remember { mutableStateOf("") }
     var osVersion by remember { mutableStateOf("") }
+    var resolvedModel by remember { mutableStateOf<TvModel?>(null) }
     var result by remember { mutableStateOf<MatchResult?>(null) }
     var current by remember { mutableStateOf<Method?>(null) }
     var note by remember { mutableStateOf("") }
     var seeded by remember { mutableStateOf(false) }
     var outcome by remember { mutableStateOf<SearchOutcome?>(null) }
+    var selectedHit by remember { mutableStateOf<Int?>(null) }
     var searching by remember { mutableStateOf(false) }
     var searchNote by remember { mutableStateOf("") }
+    var connected by remember { mutableStateOf(Adb.isConnected() && Adb.info != null) }
+    var failDialog by remember { mutableStateOf(false) }
     val searchStatus = remember { SearchProviderFactory.describe(ctx) }
 
     LaunchedEffect(Unit) {
@@ -117,21 +127,46 @@ private fun GuideScreen(onBack: () -> Unit) {
         seeded = true
     }
 
+    LaunchedEffect(brand?.id, model) {
+        resolvedModel = brand?.let { repo.resolveModel(it.id, model) }
+    }
+
+    // 只有真的连着电视，才开启「APP 检测」入口；每 2 秒刷新状态
+    LaunchedEffect(Unit) {
+        while (true) {
+            connected = Adb.isConnected() && Adb.info != null
+            delay(2_000)
+        }
+    }
+
+    fun clearSearch() {
+        outcome = null
+        selectedHit = null
+        searchNote = ""
+    }
+
     fun query() {
         val b = brand ?: return
-        val r = repo.find(b.id, null, osVersion.ifBlank { null })
+        val r = repo.find(b.id, resolvedModel?.id, osVersion.ifBlank { null })
         result = r
         current = (r as? MatchResult.Hit)?.method
         note = ""
     }
 
-    fun verify(res: VerifyResult) {
+    fun verify(res: VerifyResult, reason: String? = null) {
         val m = current ?: return
-        current = repo.recordVerification(m.id, res, osVersion.ifBlank { null }, model.ifBlank { null }, null)
+        val updated = repo.recordVerification(
+            m.id, res, osVersion.ifBlank { null }, model.ifBlank { null }, reason
+        )
+        if (updated == null) {
+            note = "没记上：APP 当前没有真实连接（或读不到设备信息），不能算「APP 实测成功」。"
+            return
+        }
+        current = updated
         note = when (res) {
-            VerifyResult.SUCCESS_APP -> "已记录：APP 实测成功，这条方法升为推荐。"
+            VerifyResult.SUCCESS_APP -> "已记录：APP 实测成功（有真实连接依据），这条方法升为推荐。"
             VerifyResult.SUCCESS_USER -> "已记录成功。累计 2 次成功后会升为推荐。"
-            VerifyResult.FAILURE -> "已记录失败。原成功记录保留，方法转入待复核。"
+            VerifyResult.FAILURE -> "已记录失败，原因已存档。原成功记录保留，方法转入待复核。"
         }
     }
 
@@ -140,12 +175,20 @@ private fun GuideScreen(onBack: () -> Unit) {
         scope.launch {
             searching = true
             searchNote = ""
+            selectedHit = null
             val svc = SearchService(
                 repo.database(), repo,
                 SearchProviderFactory.create(ctx), AppConfig.searchCacheTtlMs(ctx)
             )
             outcome = withContext(Dispatchers.IO) {
-                svc.search(SearchQuery(b.name, model.ifBlank { null }, osVersion.ifBlank { null }))
+                svc.search(
+                    SearchQuery(
+                        brandId = b.id,
+                        brand = b.name,
+                        model = model.ifBlank { null },
+                        osVersion = osVersion.ifBlank { null }
+                    )
+                )
             }
             searching = false
         }
@@ -154,14 +197,28 @@ private fun GuideScreen(onBack: () -> Unit) {
     fun saveCandidate() {
         val b = brand ?: return
         val o = outcome ?: return
+        val idx = selectedHit ?: return
         val svc = SearchService(
             repo.database(), repo,
             SearchProviderFactory.create(ctx), AppConfig.searchCacheTtlMs(ctx)
         )
-        searchNote = when (val r = svc.saveAsCandidate(o, b.id, null, "${b.name} 开启方法（来自搜索）")) {
+        searchNote = when (
+            val r = svc.saveAsCandidate(
+                outcome = o,
+                brandId = b.id,
+                modelId = resolvedModel?.id,
+                modelText = model.ifBlank { null },
+                osVersion = osVersion.ifBlank { null },
+                hitIndex = idx,
+                title = "${b.name} 开启方法（来自搜索）"
+            )
+        ) {
             is SaveResult.Saved -> "已存为候选方法，编号 ${r.methodId}。它在验证成功前不会变成推荐。"
             SaveResult.MockBlocked -> "模拟数据不能写进知识库——否则以后分不清哪条是真的。"
             SaveResult.NoSteps -> "这条结果里没有可用的步骤，不能存成教程。"
+            SaveResult.NoHit -> "没有选中任何一条结果。"
+            SaveResult.IdentityMismatch -> "搜索时的品牌/型号/版本和现在不一致，不能存。请重新搜索。"
+            SaveResult.InvalidUrl -> "这条结果的链接不合法，不能入库。"
             is SaveResult.Failed -> "保存失败：${r.reason}"
         }
     }
@@ -200,7 +257,7 @@ private fun GuideScreen(onBack: () -> Unit) {
             brands.forEach { b ->
                 FilterChip(
                     selected = b.id == brand?.id,
-                    onClick = { brand = b; result = null; current = null },
+                    onClick = { brand = b; result = null; current = null; clearSearch() },
                     label = { Text(b.name) }
                 )
             }
@@ -208,7 +265,7 @@ private fun GuideScreen(onBack: () -> Unit) {
 
         OutlinedTextField(
             value = model,
-            onValueChange = { model = it },
+            onValueChange = { model = it; result = null; current = null; clearSearch() },
             singleLine = true,
             label = { Text("电视型号（可留空，先按品牌通用教程）") },
             placeholder = { Text("例如 小米4A / 55A7 / 65E8G") },
@@ -216,12 +273,27 @@ private fun GuideScreen(onBack: () -> Unit) {
         )
         OutlinedTextField(
             value = osVersion,
-            onValueChange = { osVersion = it },
+            onValueChange = { osVersion = it; result = null; current = null; clearSearch() },
             singleLine = true,
             label = { Text("系统版本（可留空）") },
             placeholder = { Text("例如 8.1 / 9 / Android 11") },
             modifier = Modifier.fillMaxWidth()
         )
+
+        when {
+            model.isBlank() -> Text(
+                "型号留空：按品牌通用教程查。",
+                color = GDim, fontSize = 11.sp
+            )
+            resolvedModel != null -> Text(
+                "已识别型号：${resolvedModel!!.displayName}，优先匹配这个型号的专属教程。",
+                color = GGood, fontSize = 11.sp
+            )
+            else -> Text(
+                "知识库里没有「$model」这个型号：只会按 ${brand?.name ?: "品牌"} 通用教程查，不会假装是型号专属。",
+                color = GWarn, fontSize = 11.sp
+            )
+        }
 
         Button(
             onClick = { query() },
@@ -245,7 +317,14 @@ private fun GuideScreen(onBack: () -> Unit) {
             fontSize = 11.sp
         )
 
-        outcome?.let { o -> SearchOutcomeCard(o, onSave = { saveCandidate() }) }
+        outcome?.let { o ->
+            SearchOutcomeCard(
+                o = o,
+                selectedHit = selectedHit,
+                onSelect = { selectedHit = it; searchNote = "" },
+                onSave = { saveCandidate() }
+            )
+        }
         if (searchNote.isNotBlank()) Text(searchNote, color = GWarn, fontSize = 12.sp)
 
         when (val r = result) {
@@ -261,16 +340,17 @@ private fun GuideScreen(onBack: () -> Unit) {
                             "③ 试试品牌通用教程（型号留空再查一次）。",
                         color = GDim, fontSize = 13.sp
                     )
-                    Text("实时联网搜索：未配置搜索源，当前只能查本地库。", color = GWarn, fontSize = 12.sp)
+                    Text("实时联网搜索：$searchStatus", color = GWarn, fontSize = 12.sp)
                 }
             }
 
             is MatchResult.Hit -> MethodCard(
                 m = current ?: r.method,
                 level = r.level,
+                appDetectionEnabled = connected,
                 onSuccessApp = { verify(VerifyResult.SUCCESS_APP) },
                 onSuccessUser = { verify(VerifyResult.SUCCESS_USER) },
-                onFail = { verify(VerifyResult.FAILURE) }
+                onFail = { failDialog = true }
             )
         }
 
@@ -292,6 +372,14 @@ private fun GuideScreen(onBack: () -> Unit) {
             }
         }
 
+        if (failDialog) {
+            FailReasonDialog(
+                onDismiss = { failDialog = false },
+                onSkip = { failDialog = false; verify(VerifyResult.FAILURE, null) },
+                onRecord = { text -> failDialog = false; verify(VerifyResult.FAILURE, text) }
+            )
+        }
+
         Spacer(Modifier.height(12.dp))
         Text(
             "说明：当前 7 个品牌的通用教程都是「未验证」状态，来自公开资料的整理。" +
@@ -305,6 +393,7 @@ private fun GuideScreen(onBack: () -> Unit) {
 private fun MethodCard(
     m: Method,
     level: MatchLevel,
+    appDetectionEnabled: Boolean,
     onSuccessApp: () -> Unit,
     onSuccessUser: () -> Unit,
     onFail: () -> Unit
@@ -350,14 +439,24 @@ private fun MethodCard(
             }
 
             Text("这条方法管用吗？", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            if (!appDetectionEnabled) {
+                Text(
+                    "APP 现在没有连上电视，所以不能替你判断是否成功。「APP 检测」要真的连上才能用。",
+                    color = GWarn, fontSize = 11.sp
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onSuccessApp, modifier = Modifier.weight(1f)) { Text("连上了（APP 检测）") }
+                Button(
+                    onClick = onSuccessApp,
+                    enabled = appDetectionEnabled,
+                    modifier = Modifier.weight(1f)
+                ) { Text(if (appDetectionEnabled) "连上了（APP 检测）" else "APP 检测（未连接）", fontSize = 12.sp) }
                 OutlinedButton(onClick = onFail, modifier = Modifier.weight(1f)) {
                     Text("没用，失败", color = GBad)
                 }
             }
             OutlinedButton(onClick = onSuccessUser, modifier = Modifier.fillMaxWidth()) {
-                Text("我按教程开了，先记一次成功")
+                Text("我按教程开了，手动记一次成功")
             }
         }
     }
@@ -390,7 +489,12 @@ private fun fmt(ts: Long): String =
     if (ts <= 0) "-" else SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).format(Date(ts))
 
 @Composable
-private fun SearchOutcomeCard(o: SearchOutcome, onSave: () -> Unit) {
+private fun SearchOutcomeCard(
+    o: SearchOutcome,
+    selectedHit: Int?,
+    onSelect: (Int) -> Unit,
+    onSave: () -> Unit
+) {
     val r = o.response
     Card(colors = CardDefaults.cardColors(containerColor = GCard)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -404,6 +508,12 @@ private fun SearchOutcomeCard(o: SearchOutcome, onSave: () -> Unit) {
                 if (o.fromCache) Text("来自缓存", color = GDim, fontSize = 11.sp)
             }
 
+            Text(
+                "搜索条件：${o.query.brand} ${o.query.model ?: "（未填型号）"} " +
+                    (o.query.osVersion?.let { "· 系统 $it" } ?: ""),
+                color = GDim, fontSize = 11.sp
+            )
+
             if (r.isMock) {
                 Text(
                     "这不是真实联网结果，只是用来验证搜索流程的样例数据，不能写进知识库。",
@@ -415,28 +525,86 @@ private fun SearchOutcomeCard(o: SearchOutcome, onSave: () -> Unit) {
             if (err != null) {
                 Text(errText(err), color = GBad, fontSize = 13.sp)
             } else {
-                r.hits.forEach { h ->
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(h.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text(h.url, color = GAccent, fontSize = 11.sp)
-                        Text(h.snippet, color = GDim, fontSize = 12.sp)
-                        Text(
-                            "来源：${SearchService.sourceLabel(h.sourceType)} · ${h.credibility.label()} · 抓取 ${fmt(h.fetchedAt)}",
-                            color = Color(0xFF8794AB), fontSize = 11.sp
-                        )
+                Text("这些是网上找到的原始结果，不是 APP 验证过的教程。请自己点选一条再保存。", color = GDim, fontSize = 11.sp)
+
+                r.hits.forEachIndexed { i, h ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(i) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        RadioButton(selected = selectedHit == i, onClick = { onSelect(i) })
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(h.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(h.url, color = GAccent, fontSize = 11.sp)
+                            Text(h.snippet, color = GDim, fontSize = 12.sp)
+                            Text(
+                                "来源：${SearchService.sourceLabel(h.sourceType)} · ${h.credibility.label()} · 抓取 ${fmt(h.fetchedAt)}",
+                                color = Color(0xFF8794AB), fontSize = 11.sp
+                            )
+                            if (h.extractedSteps.isEmpty()) {
+                                Text("这条没有可提取的步骤，不能存成教程。", color = GWarn, fontSize = 11.sp)
+                            } else {
+                                Text("步骤 ${h.extractedSteps.size} 条", color = GGood, fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
 
                 if (o.canSaveToKb) {
-                    Button(onClick = onSave, modifier = Modifier.fillMaxWidth()) {
-                        Text("存为候选方法（仍需实机验证）", fontSize = 13.sp)
+                    if (selectedHit == null) {
+                        Text("先点选一条结果，才能保存。", color = GWarn, fontSize = 12.sp)
                     }
+                    Button(
+                        onClick = onSave,
+                        enabled = selectedHit != null,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("把选中的这一条存为候选（仍需实机验证）", fontSize = 13.sp) }
                 } else {
-                    Text("模拟数据不能存为方法。", color = GWarn, fontSize = 12.sp)
+                    Text("这次结果不能存为方法（模拟数据或搜索失败）。", color = GWarn, fontSize = 12.sp)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun FailReasonDialog(
+    onDismiss: () -> Unit,
+    onSkip: () -> Unit,
+    onRecord: (String) -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("记一下失败原因") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "失败发生在哪一步？电视上显示了什么（例如找不到菜单、选项是灰的、提示无权限）？",
+                    color = GDim, fontSize = 12.sp
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    minLines = 3,
+                    placeholder = { Text("不填也可以，会记为「未提供原因」") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onRecord(text) }, enabled = text.isNotBlank()) { Text("记录原因") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onSkip) { Text("不填，直接记录") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    )
 }
 
 private fun errText(e: SearchError): String = when (e) {

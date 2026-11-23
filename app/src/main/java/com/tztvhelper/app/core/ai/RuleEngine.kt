@@ -81,8 +81,9 @@ class RuleEngine(private val lookup: TutorialLookup) : AiEngine {
 
     private fun tutorialAnswer(profile: DeviceProfile): AiAnswer {
         val brand = profile.brandName ?: "该品牌"
-        return when (val r = lookup.find(profile.brandId, null, profile.osVersion)) {
-            is MatchResult.Hit -> fromMethod(r.method, brand)
+        val modelId = lookup.resolveModelId(profile.brandId, profile.model)
+        return when (val r = lookup.find(profile.brandId, modelId, profile.osVersion)) {
+            is MatchResult.Hit -> fromMethod(r.method, brand, r.level)
             is MatchResult.NotFound -> AiAnswer(
                 text = "本地知识库里没有「$brand" +
                     (profile.model?.let { " $it" } ?: "") +
@@ -99,7 +100,7 @@ class RuleEngine(private val lookup: TutorialLookup) : AiEngine {
         }
     }
 
-    private fun fromMethod(m: Method, brand: String): AiAnswer {
+    private fun fromMethod(m: Method, brand: String, level: com.tztvhelper.app.core.kb.MatchLevel): AiAnswer {
         val (conf, risk, statusLine) = when (m.status) {
             MethodStatus.RECOMMENDED ->
                 Triple(AnswerConfidence.KB_RECOMMENDED, RiskLevel.LOW, "已推荐：有 ${m.successCount} 次成功记录")
@@ -113,6 +114,14 @@ class RuleEngine(private val lookup: TutorialLookup) : AiEngine {
 
         val text = buildString {
             appendLine("找到一条 $brand 的方法：${m.title}")
+            when (level) {
+                com.tztvhelper.app.core.kb.MatchLevel.EXACT_MODEL_OS ->
+                    appendLine("匹配程度：你的型号 + 系统版本都对上了。")
+                com.tztvhelper.app.core.kb.MatchLevel.MODEL ->
+                    appendLine("匹配程度：型号对上了，系统版本没有专门记录。")
+                com.tztvhelper.app.core.kb.MatchLevel.BRAND_GENERIC ->
+                    appendLine("匹配程度：这是 $brand 的品牌通用方法，没有你那个型号的专属教程，菜单可能和你的电视有出入。")
+            }
             appendLine("状态：$statusLine。")
             if (m.status != MethodStatus.RECOMMENDED) {
                 appendLine("这条资料还没在真机上确认过，请一步一步对照电视画面；哪一步和你的电视不一样，就停下告诉我。")
