@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -64,12 +65,13 @@ import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-private val Bg = Color(0xFF0B1220)
-private val CardBg = Color(0xFF16213A)
-private val Accent = Color(0xFF4DA3FF)
-private val Good = Color(0xFF7CF0C0)
-private val Warn = Color(0xFFFFB86B)
-private val Bad = Color(0xFFFF7B7B)
+// 颜色统一来自 ui/Theme.kt，这里只保留旧名字指向共享主题
+private val Bg = Tv.bg
+private val CardBg = Tv.card
+private val Accent = Tv.accent
+private val Good = Tv.good
+private val Warn = Tv.warn
+private val Bad = Tv.bad
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,7 +83,7 @@ class MainActivity : ComponentActivity() {
                     primary = Accent,
                     background = Bg,
                     surface = CardBg,
-                    onPrimary = Color(0xFF04121F)
+                    onPrimary = Tv.onAccent
                 )
             ) {
                 Surface(modifier = Modifier.fillMaxSize(), color = Bg) {
@@ -172,10 +174,7 @@ private fun App() {
             onScan = ::startScan,
             onConnect = ::startConnect,
             message = message,
-            onOpenGuide = {
-                ctx.startActivity(android.content.Intent(ctx, GuideActivity::class.java))
-            },
-            onOpenAi = {
+            onOpenAssistant = {
                 ctx.startActivity(android.content.Intent(ctx, AiActivity::class.java))
             }
         )
@@ -228,8 +227,7 @@ private fun HomeScreen(
     onScan: () -> Unit,
     onConnect: (String) -> Unit,
     message: String,
-    onOpenGuide: () -> Unit,
-    onOpenAi: () -> Unit
+    onOpenAssistant: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -241,30 +239,22 @@ private fun HomeScreen(
         Text("兔子电视助手", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
         Text(
             "手机和电视连同一个 Wi-Fi，先打开电视上的 ADB 调试，再点下面的按钮。",
-            color = Color(0xFFA9B6CC), fontSize = 14.sp
+            color = Tv.dim, fontSize = 14.sp
         )
 
-        OutlinedButton(
-            onClick = onOpenGuide,
+        Button(
+            onClick = onOpenAssistant,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
+                .heightIn(min = TvSpace.touch)
+                .height(56.dp)
         ) {
-            Text("不知道 ADB 怎么开？看开启教程", fontSize = 15.sp)
-        }
-
-        OutlinedButton(
-            onClick = onOpenAi,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-        ) {
-            Text("问 AI 助手（本地规则，不联网）", fontSize = 15.sp)
+            Text("不会开 ADB？让助手一步步带你开", fontSize = 15.sp)
         }
 
         Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("本机 Wi-Fi 地址", color = Color(0xFFA9B6CC), fontSize = 13.sp)
+                Text("本机 Wi-Fi 地址", color = Tv.dim, fontSize = 13.sp)
                 Text(
                     localIp.ifBlank { "未连接 Wi-Fi" },
                     color = if (localIp.isBlank()) Warn else Good,
@@ -292,7 +282,7 @@ private fun HomeScreen(
             )
             Text(
                 "已检查 ${progress.first}/${progress.second} 个地址",
-                color = Color(0xFFA9B6CC),
+                color = Tv.dim,
                 fontSize = 13.sp
             )
         }
@@ -313,7 +303,7 @@ private fun HomeScreen(
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(host, color = Color.White, fontSize = 16.sp)
-                            Text("5555 端口开着", color = Color(0xFFA9B6CC), fontSize = 12.sp)
+                            Text("5555 端口开着", color = Tv.dim, fontSize = 12.sp)
                         }
                         Button(onClick = { onConnect(host) }) { Text("连接") }
                     }
@@ -321,7 +311,7 @@ private fun HomeScreen(
             }
         }
 
-        HorizontalDivider(color = Color(0xFF22304D))
+        HorizontalDivider(color = Tv.line)
 
         Text("没搜到？手动输入电视 IP", fontWeight = FontWeight.SemiBold, color = Color.White, fontSize = 15.sp)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -344,7 +334,7 @@ private fun HomeScreen(
         Text(
             "提示：各品牌 ADB 开关位置不一样，点上面的「开启教程」按你的品牌查；" +
                 "教程里没有的型号可以在教程页反馈，后续补充。",
-            color = Color(0xFF8794AB),
+            color = Tv.dimmer,
             fontSize = 12.sp
         )
     }
@@ -377,12 +367,12 @@ private fun ConnectingScreen(
                 Text(
                     "如果电视弹出「允许 USB 调试吗」或「是否允许调试」，" +
                         "请用遥控器选「允许 / 确定」。点完之后这里会自动连上。",
-                    color = Color(0xFFD5DEEE),
+                    color = Tv.bright,
                     fontSize = 14.sp
                 )
                 Text(
                     "已经尝试 $attempts 次。没有弹窗的话，说明电视上的 ADB 调试还没打开。",
-                    color = Color(0xFFA9B6CC),
+                    color = Tv.dim,
                     fontSize = 13.sp
                 )
                 if (lastError.isNotBlank()) {
@@ -546,7 +536,7 @@ private fun DeviceScreen(
                             Text("从手机装到电视", color = Color.White, fontWeight = FontWeight.SemiBold)
                             Text(
                                 "先在手机上下载好电视版的 APK，然后点下面的按钮选中它。",
-                                color = Color(0xFFA9B6CC), fontSize = 13.sp
+                                color = Tv.dim, fontSize = 13.sp
                             )
                         }
                     }
@@ -566,7 +556,7 @@ private fun DeviceScreen(
                     Text(
                         "安装失败最常见的原因：电视禁止安装未知来源应用；或者 APK 是手机版，" +
                             "电视装得上但用不了（需要 TV 版 / 横屏版）。",
-                        color = Color(0xFF8794AB), fontSize = 12.sp
+                        color = Tv.dimmer, fontSize = 12.sp
                     )
                 }
             }
@@ -655,7 +645,7 @@ private fun Overview(device: DeviceInfo) {
                     "1. 禁用预装应用：只禁用你认识的，禁用前会二次确认。\n" +
                         "2. 换桌面：部分电视锁定了默认桌面，改了可能不生效。\n" +
                         "3. 出问题先做「恢复」：把禁用的应用全部开回来。",
-                    color = Color(0xFFA9B6CC), fontSize = 13.sp
+                    color = Tv.dim, fontSize = 13.sp
                 )
             }
         }
@@ -666,7 +656,7 @@ private fun Overview(device: DeviceInfo) {
 private fun InfoCard(label: String, value: String) {
     Card(colors = CardDefaults.cardColors(containerColor = CardBg)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, color = Color(0xFFA9B6CC), fontSize = 12.sp)
+            Text(label, color = Tv.dim, fontSize = 12.sp)
             Text(value, color = Color.White, fontSize = 16.sp)
         }
     }
@@ -690,15 +680,15 @@ private fun AppRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(app.pkg, color = Color(0xFF8794AB), fontSize = 11.sp)
+                    Text(app.pkg, color = Tv.dimmer, fontSize = 12.sp)
                 }
-                if (app.system) Tag("系统", Color(0xFF3B4B6B))
-                if (app.disabled) Tag("已禁用", Color(0xFF6B3B3B))
+                if (app.system) Tag("系统", Tv.lineStrong)
+                if (app.disabled) Tag("已禁用", Tv.badBg)
             }
 
             when {
                 Pkgs.isCritical(app.pkg) -> {
-                    Text("系统关键应用，不提供禁用", color = Color(0xFF8794AB), fontSize = 12.sp)
+                    Text("系统关键应用，不提供禁用", color = Tv.dimmer, fontSize = 12.sp)
                 }
 
                 app.disabled -> {
@@ -729,6 +719,6 @@ private fun Tag(text: String, color: Color) {
             .background(color, RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 3.dp)
     ) {
-        Text(text, color = Color.White, fontSize = 11.sp)
+        Text(text, color = Color.White, fontSize = 12.sp)
     }
 }

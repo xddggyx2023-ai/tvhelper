@@ -123,6 +123,7 @@ class KbRepository(
 
     fun brands(): List<Brand> = db.brands()
     fun models(brandId: String): List<TvModel> = db.models(brandId)
+    fun method(id: String): Method? = db.method(id)
 
     /** 手输型号 → 库内型号 ID。匹配不唯一或无匹配就返回 null（界面显示"品牌通用"） */
     fun resolveModel(brandId: String, modelText: String?): TvModel? {
