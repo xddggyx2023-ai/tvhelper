@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "kbVersion": "2026.11.24-a",
+  "kbVersion": "2026.11.24-b",
   "note": "型号只收录公开资料里常见、能确定存在的系列名；不确定的型号宁可不写。androidVersions 留空表示没有逐个核实过系统版本，界面不要据此宣称版本专属。",
   "brands": [
     {
@@ -39,6 +39,9 @@
       "models": [
         { "id": "tcl-v6", "model": "V6", "displayName": "TCL V6 系列" },
         { "id": "tcl-v8", "model": "V8", "displayName": "TCL V8 系列" },
+        { "id": "tcl-p6", "model": "P6", "displayName": "TCL P6 系列" },
+        { "id": "tcl-p8", "model": "P8", "displayName": "TCL P8 系列" },
+        { "id": "tcl-c8", "model": "C8", "displayName": "TCL C8 系列" },
         { "id": "tcl-q10", "model": "Q10", "displayName": "TCL Q10 系列" }
       ]
     },
@@ -47,7 +50,8 @@
       "models": [
         { "id": "skyworth-a5", "model": "A5", "displayName": "创维 A5 系列" },
         { "id": "skyworth-a7", "model": "A7", "displayName": "创维 A7 系列" },
-        { "id": "skyworth-a8", "model": "A8", "displayName": "创维 A8 系列" }
+        { "id": "skyworth-a8", "model": "A8", "displayName": "创维 A8 系列" },
+        { "id": "skyworth-s81", "model": "S81", "displayName": "创维 S81 系列" }
       ]
     },
     {
