@@ -14,8 +14,8 @@ android {
         applicationId = "com.tztvhelper.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
 
         // 搜索服务地址：留空表示未部署；部署后改这里或运行时用 AppConfig.setSearchBaseUrl 覆盖
         buildConfigField("String", "SEARCH_BASE_URL", "\"\"")

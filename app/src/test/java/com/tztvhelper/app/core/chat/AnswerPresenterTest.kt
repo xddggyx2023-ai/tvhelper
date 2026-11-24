@@ -7,6 +7,8 @@ import com.tztvhelper.app.core.ai.DeviceProfile
 import com.tztvhelper.app.core.ai.Intent
 import com.tztvhelper.app.core.ai.RiskLevel
 import com.tztvhelper.app.core.guide.GuideStage
+import com.tztvhelper.app.core.guide.GuideState
+import com.tztvhelper.app.core.guide.TroubleshootBranch
 import com.tztvhelper.app.core.kb.TutorialStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -120,26 +122,35 @@ class AnswerPresenterTest {
     @Test
     fun `快捷回复按引导阶段生成`() {
         val profile = DeviceProfile("xiaomi", "小米", "4A", "8.1")
-        assertEquals(3, QuickReplies.forAnswer(answer(), profile, GuideStage.STEP).size)
+        assertEquals(3, QuickReplies.forAnswer(answer(), profile, GuideState(stage = GuideStage.STEP)).size)
         assertEquals(
             listOf("我看到了，下一步", "我没找到这个", "和我看到的不一样"),
-            QuickReplies.forAnswer(answer(), profile, GuideStage.STEP)
+            QuickReplies.forAnswer(answer(), profile, GuideState(stage = GuideStage.STEP))
         )
-        assertEquals(2, QuickReplies.forAnswer(answer(), profile, GuideStage.TROUBLESHOOT).size)
-        assertTrue(QuickReplies.forAnswer(answer(), profile, GuideStage.PORT_CHECK).isEmpty())
+        assertEquals(
+            listOf("重新连接", "还是没弹窗"),
+            QuickReplies.forAnswer(
+                answer(), profile,
+                GuideState(stage = GuideStage.TROUBLESHOOT, branch = TroubleshootBranch.NO_AUTH_DIALOG)
+            )
+        )
+        assertEquals(2, QuickReplies.forAnswer(answer(), profile, GuideState(stage = GuideStage.TROUBLESHOOT)).size)
+        assertTrue(QuickReplies.forAnswer(answer(), profile, GuideState(stage = GuideStage.PORT_CHECK)).isEmpty())
     }
 
     @Test
     fun `快捷回复跟着意图变化且有上限`() {
         val profile = DeviceProfile("xiaomi", "小米", "4A", "8.1")
-        val noKb = QuickReplies.forAnswer(answer(confidence = AnswerConfidence.NO_KB), profile, GuideStage.IDLE)
+        val noKb = QuickReplies.forAnswer(
+            answer(confidence = AnswerConfidence.NO_KB), profile, GuideState()
+        )
         assertTrue(noKb.contains("先按品牌通用方法查"))
         val kb = QuickReplies.forAnswer(
-            answer(confidence = AnswerConfidence.KB_RECOMMENDED), profile, GuideStage.IDLE
+            answer(confidence = AnswerConfidence.KB_RECOMMENDED), profile, GuideState()
         )
         assertTrue(kb.contains("开始一步步引导"))
         assertTrue(kb.size <= 4)
-        assertTrue(QuickReplies.forAnswer(answer(), DeviceProfile(), GuideStage.IDLE).isEmpty())
+        assertTrue(QuickReplies.forAnswer(answer(), DeviceProfile(), GuideState()).isEmpty())
     }
 
     @Test

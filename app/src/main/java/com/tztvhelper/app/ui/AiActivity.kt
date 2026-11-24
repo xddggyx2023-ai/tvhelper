@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tztvhelper.app.core.adb.Adb
 import com.tztvhelper.app.core.ai.AiAnswer
+import com.tztvhelper.app.core.ai.AnswerConfidence
 import com.tztvhelper.app.core.ai.DeviceProfile
 import com.tztvhelper.app.core.ai.RuleEngine
 import com.tztvhelper.app.core.chat.AnswerFold
@@ -62,10 +63,21 @@ import com.tztvhelper.app.core.chat.ChatAction
 import com.tztvhelper.app.core.chat.ChatActionKind
 import com.tztvhelper.app.core.chat.ChatOnboarding
 import com.tztvhelper.app.core.chat.QuickReplies
+import com.tztvhelper.app.core.discovery.Net
+import com.tztvhelper.app.core.guide.GuideCopy
+import com.tztvhelper.app.core.guide.GuideEvent
+import com.tztvhelper.app.core.guide.GuideFlow
+import com.tztvhelper.app.core.guide.GuideProgressStore
 import com.tztvhelper.app.core.guide.GuideStage
+import com.tztvhelper.app.core.guide.GuideState
+import com.tztvhelper.app.core.guide.GuideStorage
+import com.tztvhelper.app.core.guide.TroubleshootBranch
 import com.tztvhelper.app.core.kb.Brand
 import com.tztvhelper.app.core.kb.KbRepository
-import com.tztvhelper.app.core.kb.MatchPicker
+import com.tztvhelper.app.core.kb.MatchResult
+import com.tztvhelper.app.core.kb.Method
+import com.tztvhelper.app.core.kb.TutorialStep
+import com.tztvhelper.app.core.kb.VerificationRules
 import com.tztvhelper.app.core.profile.DeviceProfileStore
 import com.tztvhelper.app.core.search.SaveResult
 import com.tztvhelper.app.core.search.SearchOutcome
@@ -93,8 +105,18 @@ private data class ChatMessage(
     val text: String,
     val answer: AiAnswer? = null,
     val search: SearchOutcome? = null,
-    val kind: MsgKind = MsgKind.TEXT
+    val kind: MsgKind = MsgKind.TEXT,
+    val step: TutorialStep? = null,
+    val stepIndex: Int = 0,
+    val stepTotal: Int = 0
 )
+
+/** 引导进度存在独立的 SharedPreferences 里，退出再进来能接着走 */
+private class PrefsGuideStorage(ctx: android.content.Context) : GuideStorage {
+    private val prefs = ctx.getSharedPreferences("guide_progress", android.content.Context.MODE_PRIVATE)
+    override fun read(): String? = prefs.getString("state", null)
+    override fun write(value: String) { prefs.edit().putString("state", value).apply() }
+}
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -115,7 +137,11 @@ private fun ChatScreen() {
     var showSheet by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var awaitingModel by remember { mutableStateOf(false) }
-    var stage by remember { mutableStateOf(GuideStage.IDLE) }
+    var guide by remember { mutableStateOf(GuideState()) }
+    var guideMethod by remember { mutableStateOf<Method?>(null) }
+    var pendingHosts by remember { mutableStateOf<List<String>>(emptyList()) }
+    var lastHost by remember { mutableStateOf<String?>(null) }
+    val guideStore = remember { GuideProgressStore(PrefsGuideStorage(ctx.applicationContext)) }
     var folds by remember { mutableStateOf<Map<Long, AnswerFold>>(emptyMap()) }
     var selection by remember { mutableStateOf<Map<Long, Int>>(emptyMap()) }
     var notes by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
@@ -128,11 +154,254 @@ private fun ChatScreen() {
     fun addText(text: String, answer: AiAnswer? = null, kind: MsgKind = MsgKind.TEXT) =
         add(ChatMessage(nextId(), false, text, answer = answer, kind = kind))
 
+    fun updateText(id: Long, text: String) {
+        messages = messages.map { if (it.id == id) it.copy(text = text) else it }
+    }
+
+    fun persist(g: GuideState) {
+        guide = g
+        guideStore.save(g)
+    }
+
+    fun addStepMessage(m: Method, s: GuideState) {
+        val step = m.steps.getOrNull(s.stepIndex) ?: return
+        add(
+            ChatMessage(
+                nextId(), false, "第 ${s.stepNumber} 步，共 ${s.totalSteps} 步。",
+                step = step, stepIndex = s.stepIndex, stepTotal = s.totalSteps
+            )
+        )
+    }
+
+    fun profileMatches(deviceBrand: String, deviceModel: String): Boolean {
+        val b = brands.firstOrNull { it.id == profile.brandId } ?: return false
+        if (!VerificationRules.matchesBrand(deviceBrand, b)) return false
+        val typed = profile.model?.takeIf { it.isNotBlank() } ?: return true
+        val key = repo.resolveModel(b.id, typed)?.model ?: typed
+        return VerificationRules.matchesModel(deviceModel, key)
+    }
+
+    fun acceptDetected() {
+        val d = guide.detectedBrand ?: return
+        val matched = brands.firstOrNull { VerificationRules.matchesBrand(d, it) }
+        val p = profile.copy(
+            brandId = matched?.id ?: profile.brandId,
+            brandName = matched?.name ?: profile.brandName ?: d,
+            model = guide.detectedModel,
+            osVersion = guide.detectedOs,
+            adbOpened = true
+        )
+        profile = p
+        store.save(p)
+        persist(GuideFlow.reduce(guide, GuideEvent.AcceptDetected).state)
+        addText("已按电视实际信息更新档案：${p.brandName} ${p.model ?: ""}，系统 ${p.osVersion ?: "未知"}。")
+    }
+
+    fun keepMine() {
+        val p = profile.copy(adbOpened = true)
+        profile = p
+        store.save(p)
+        persist(GuideFlow.reduce(guide, GuideEvent.KeepMine).state)
+        addText("好，保留你填的档案。连接已经建立，可以用首页的功能了。")
+    }
+
+    fun connect(host: String) {
+        lastHost = host
+        val pid = nextId()
+        add(
+            ChatMessage(
+                pid, false,
+                "正在连接 $host …请看电视屏幕，弹出「允许调试」就用遥控器点允许。",
+                kind = MsgKind.PROGRESS
+            )
+        )
+        scope.launch {
+            val r = Adb.connect(host) { attempt, err ->
+                scope.launch {
+                    updateText(
+                        pid,
+                        "正在连接 $host：第 $attempt 次尝试" + if (err.isNotBlank()) "（$err）" else ""
+                    )
+                }
+            }
+            r.onSuccess { info ->
+                val brand = info.brand.ifBlank { info.manufacturer }.ifBlank { "未知品牌" }
+                val same = profileMatches(brand, info.model)
+                var s = GuideFlow.reduce(guide, GuideEvent.Connected(same)).state
+                s = GuideFlow.withDevice(s, brand, info.model, info.release)
+                persist(s)
+                updateText(pid, "连上了：$brand ${info.model}，系统 ${info.release}。")
+                if (same) {
+                    profile = profile.copy(adbOpened = true)
+                    store.save(profile)
+                    addText("已经连上你的电视，整个流程走完了。\n现在可以回首页，搜索附近的电视或手动输入 IP，安装和管理应用。")
+                } else {
+                    addText(
+                        "检测到你的电视实际是「$brand ${info.model}」，系统 ${info.release}；" +
+                            "和你填的「${profile.brandName ?: ""} ${profile.model ?: ""}」不一致。\n是否以此为准？"
+                    )
+                }
+            }.onFailure { e ->
+                persist(guide.copy(stage = GuideStage.CONNECT, awaitConfirm = false))
+                updateText(pid, "没连上：${e.message ?: "电视没有响应"}")
+                addText("先确认电视上的 ADB 开关还开着、手机和电视在同一个 Wi-Fi，再点「重新连接」。")
+            }
+        }
+    }
+
+    fun checkPort() {
+        val m = guideMethod ?: return
+        val ip = Net.localIpv4()
+        if (ip == null) {
+            addText("手机现在没有连 Wi-Fi，没法检查电视端口。先连上同一个 Wi-Fi 再点「我看到了，下一步」。")
+            return
+        }
+        val pid = nextId()
+        add(
+            ChatMessage(
+                pid, false,
+                "教程走完了。现在检查电视有没有打开 5555 端口（大约几秒），这一步是真检测。",
+                kind = MsgKind.PROGRESS
+            )
+        )
+        scope.launch {
+            val found = runCatching {
+                Net.scanPort5555(ip) { done, total ->
+                    if (done % 32 == 0 || done == total) {
+                        scope.launch { updateText(pid, "正在检查：$done/$total") }
+                    }
+                }
+            }.getOrDefault(emptyList())
+
+            if (found.isEmpty()) {
+                val t = GuideFlow.reduce(guide, GuideEvent.PortClosed).state
+                persist(t)
+                updateText(
+                    pid,
+                    "没有找到开着 5555 端口的电视。可能原因：\n" +
+                        "1) 电视上的 ADB 开关没有真正打开；\n" +
+                        "2) 手机和电视不在同一个 Wi-Fi；\n" +
+                        "3) 电视只在有线网络下开放调试。"
+                )
+                addText("我先退回到上一步，你对照电视再看一眼。")
+                addStepMessage(m, t)
+            } else if (found.size == 1) {
+                val t = GuideFlow.reduce(guide, GuideEvent.PortOpen).state
+                persist(t)
+                updateText(pid, "电视的 5555 端口开着：${found[0]}")
+                connect(found[0])
+            } else {
+                val t = GuideFlow.reduce(guide, GuideEvent.PortOpen).state
+                persist(t)
+                pendingHosts = found
+                updateText(pid, "找到 ${found.size} 台开着 5555 的设备。请点下面你电视的 IP：")
+            }
+        }
+    }
+
+    fun nextStep() {
+        val m = guideMethod ?: return
+        val t = GuideFlow.reduce(guide, GuideEvent.Next)
+        persist(t.state)
+        if (t.effects.contains(com.tztvhelper.app.core.guide.GuideEffect.ScanPort)) {
+            addText("教程的步骤做完了，下面开始检测电视。")
+            checkPort()
+        } else if (t.state.stage == GuideStage.STEP) {
+            addText("好，继续。")
+            addStepMessage(m, t.state)
+        }
+    }
+
+    fun startGuide() {
+        val brandId = profile.brandId
+        if (brandId == null) {
+            addText("先告诉我你的电视品牌，我才能查对应的开启方法。")
+            return
+        }
+        val modelId = repo.resolveModelId(brandId, profile.model)
+        when (val r = repo.find(brandId, modelId, profile.osVersion)) {
+            is MatchResult.Hit -> {
+                guideMethod = r.method
+                val t = GuideFlow.reduce(GuideState(), GuideEvent.Start(r.method.id, r.method.steps.size))
+                persist(t.state)
+                addText("我会一步一步来，一次只做一步。把遥控器拿在手上，跟着做就行。")
+                addStepMessage(r.method, t.state)
+            }
+            is MatchResult.NotFound -> {
+                val a = AiAnswer(
+                    text = "知识库里没有这台电视的开启教程，我不会编菜单路径。\n" +
+                        "可以点下面的按钮联网搜这个型号；搜到的是网上原始资料，需要你自己对照和判断。",
+                    confidence = AnswerConfidence.NO_KB,
+                    intent = com.tztvhelper.app.core.ai.Intent.FIND_TUTORIAL,
+                    actions = listOf(com.tztvhelper.app.core.ai.AiAction.OPEN_SEARCH),
+                    risk = com.tztvhelper.app.core.ai.RiskLevel.MEDIUM
+                )
+                addText(a.text, a)
+            }
+        }
+    }
+
+    fun showBranch(event: GuideEvent) {
+        val t = GuideFlow.reduce(guide, event).state
+        persist(t)
+        t.branch?.let { b ->
+            val copy = GuideCopy.branch(b)
+            addText("${copy.title}\n${copy.body}\n${copy.next}")
+        }
+    }
+
+    fun branchDone() {
+        val t = GuideFlow.reduce(guide, GuideEvent.BranchDone).state
+        persist(t)
+        guideMethod?.let { addStepMessage(it, t) }
+    }
+
+    fun stillStuck() {
+        if (guide.branch == TroubleshootBranch.NO_DEVELOPER_OPTIONS) {
+            showBranch(GuideEvent.NoAdbSwitch)
+        } else {
+            addText("如果还是不行，说明这台电视的系统没有向普通用户开放 ADB。\n可以换个办法：在电视自带的应用商店里装，或者联系品牌客服问「怎么打开 ADB 调试」。我不会给你编一个不存在的菜单。")
+        }
+    }
+
+    fun retryConnect() {
+        val host = lastHost
+        if (host == null) {
+            addText("还不知道电视的 IP。先点「我看到了，下一步」，我去扫一下端口。")
+            return
+        }
+        if (guide.stage != GuideStage.CONNECT) persist(guide.copy(stage = GuideStage.CONNECT, awaitConfirm = false))
+        connect(host)
+    }
+
     LaunchedEffect(Unit) {
         repo.ensureSeeded()
         brands = repo.brands()
         if (ChatOnboarding.needsBrand(profile)) addText(ChatOnboarding.firstPrompt())
         else addText(ChatOnboarding.welcome(profile))
+
+        // 退出再进来：能接着上次的步骤走
+        val restored = guideStore.load()
+        if (restored != null && restored.stage != GuideStage.IDLE) {
+            val m = restored.methodId?.let { repo.method(it) }
+            if (m != null) {
+                guide = restored
+                guideMethod = m
+                if (restored.stage == GuideStage.STEP) {
+                    addText("上次的进度还在：第 ${restored.stepNumber} 步，共 ${restored.totalSteps} 步。继续吧。")
+                    addStepMessage(m, restored)
+                } else if (restored.stage == GuideStage.CONNECT) {
+                    addText("上次停在连接这一步。确认电视上的 ADB 还开着，再点「重新连接」。")
+                } else if (restored.stage == GuideStage.PORT_CHECK) {
+                    addText("上次停在端口检测这一步，我再检查一次。")
+                    checkPort()
+                } else {
+                    addText("上次已经连上了。如果现在连不上，回首页重新搜索电视。")
+                }
+            } else {
+                guideStore.clear()
+            }
+        }
     }
 
     LaunchedEffect(messages.size) {
@@ -196,10 +465,7 @@ private fun ChatScreen() {
         }
         when (t) {
             ChatOnboarding.SKIP_MODEL -> { skipModel(); return }
-            "开始一步步引导" -> {
-                addText(engine.answer("怎么开 ADB", profile).text, engine.answer("怎么开 ADB", profile))
-                return
-            }
+            "开始一步步引导" -> { startGuide(); return }
             "先按品牌通用方法查" -> {
                 val p = profile.copy(model = null)
                 profile = p; store.save(p)
@@ -213,8 +479,18 @@ private fun ChatScreen() {
     }
 
     fun onQuickReply(text: String) {
-        if (ProfileText.looksLikeIp(text)) return
-        send(text)
+        when (text) {
+            "我看到了，下一步" -> { add(ChatMessage(nextId(), true, text)); nextStep() }
+            "我没找到这个" -> { add(ChatMessage(nextId(), true, text)); showBranch(GuideEvent.NotFound) }
+            "和我看到的不一样" -> { add(ChatMessage(nextId(), true, text)); showBranch(GuideEvent.Different) }
+            "我做完了，回到刚才那一步" -> { add(ChatMessage(nextId(), true, text)); branchDone() }
+            "还是不行" -> { add(ChatMessage(nextId(), true, text)); stillStuck() }
+            "电视没弹窗", "还是没弹窗" -> { add(ChatMessage(nextId(), true, text)); showBranch(GuideEvent.NoAuthDialog) }
+            "重新连接" -> { add(ChatMessage(nextId(), true, text)); retryConnect() }
+            "是，用检测到的" -> { add(ChatMessage(nextId(), true, text)); acceptDetected() }
+            "保持我填的" -> { add(ChatMessage(nextId(), true, text)); keepMine() }
+            else -> send(text)
+        }
     }
 
     fun saveProfile(p: DeviceProfile) {
@@ -307,8 +583,15 @@ private fun ChatScreen() {
                         } else if (awaitingModel) {
                             QuickRow(listOf(ChatOnboarding.SKIP_MODEL)) { skipModel() }
                         } else {
-                            val q = QuickReplies.forAnswer(msg.answer, profile, stage)
+                            val q = QuickReplies.forAnswer(msg.answer, profile, guide)
                             if (q.isNotEmpty()) QuickRow(q, ::onQuickReply)
+                            if (pendingHosts.isNotEmpty()) {
+                                QuickRow(pendingHosts) { host ->
+                                    pendingHosts = emptyList()
+                                    add(ChatMessage(nextId(), true, host))
+                                    connect(host)
+                                }
+                            }
                         }
                     }
                 }
@@ -354,12 +637,6 @@ private fun ChatScreen() {
             containerColor = Tv.card
         )
     }
-}
-
-/** 只做纯文本判断，避免把 IP 当问题发出去 */
-private object ProfileText {
-    private val ip = Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
-    fun looksLikeIp(s: String) = ip.matches(s.trim())
 }
 
 @Composable
@@ -443,6 +720,21 @@ private fun AssistantBubble(
                     fontSize = TvText.body,
                     lineHeight = 22.sp
                 )
+
+                msg.step?.let { s ->
+                    val expect = when {
+                        s.path.isNotEmpty() -> "做完你应该看到：" + s.path.joinToString(" → ")
+                        s.note.isNotBlank() -> "注意：" + s.note
+                        else -> ""
+                    }
+                    StepCard(index = msg.stepIndex + 1, title = s.title, detail = s.detail, expect = expect)
+                    if (msg.stepTotal > 1) {
+                        Text(
+                            "第 ${msg.stepIndex + 1} 步 / 共 ${msg.stepTotal} 步",
+                            color = Tv.dimmer, fontSize = TvText.tiny
+                        )
+                    }
+                }
 
                 if (a != null && AnswerPresenter.hasSteps(a)) {
                     a.steps.take(AnswerPresenter.stepsToShow(a.steps, fold)).forEachIndexed { i, s ->
@@ -574,7 +866,7 @@ private fun StepCard(index: Int, title: String, detail: String, expect: String) 
         verticalArrangement = Arrangement.spacedBy(TvSpace.xs)
     ) {
         Text("第 $index 步 · $title", color = Tv.good, fontSize = TvText.bodySmall, fontWeight = FontWeight.SemiBold)
-        Text(detail, color = Tv.dim, fontSize = TvText.body)
+        Text("现在做什么：$detail", color = Tv.dim, fontSize = TvText.body)
         if (expect.isNotBlank()) Text(expect, color = Tv.dimmer, fontSize = TvText.tiny)
     }
 }

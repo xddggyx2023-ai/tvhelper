@@ -7,6 +7,8 @@ import com.tztvhelper.app.core.ai.DeviceProfile
 import com.tztvhelper.app.core.ai.Intent
 import com.tztvhelper.app.core.ai.RiskLevel
 import com.tztvhelper.app.core.guide.GuideStage
+import com.tztvhelper.app.core.guide.GuideState
+import com.tztvhelper.app.core.guide.TroubleshootBranch
 
 /** 一条助手消息最多两个操作按钮：一个主要、一个次要 */
 enum class ChatActionKind { OPEN_GUIDE, SEARCH_WEB, SET_PROFILE, OPEN_SCAN }
@@ -92,14 +94,18 @@ object QuickReplies {
 
     const val SKIP_MODEL = "不知道，跳过"
 
-    fun forAnswer(answer: AiAnswer?, profile: DeviceProfile, stage: GuideStage): List<String> = when {
-        stage == GuideStage.STEP ->
+    fun forAnswer(answer: AiAnswer?, profile: DeviceProfile, guide: GuideState): List<String> = when {
+        guide.awaitConfirm -> listOf("是，用检测到的", "保持我填的")
+        guide.stage == GuideStage.STEP ->
             listOf("我看到了，下一步", "我没找到这个", "和我看到的不一样")
-        stage == GuideStage.TROUBLESHOOT ->
-            listOf("试过了还是不行", "回到刚才那一步")
-        stage == GuideStage.CONNECT ->
-            listOf("电视弹窗我点了允许", "电视没弹窗")
-        stage == GuideStage.PORT_CHECK -> emptyList()
+        guide.stage == GuideStage.TROUBLESHOOT && guide.branch == TroubleshootBranch.NO_AUTH_DIALOG ->
+            listOf("重新连接", "还是没弹窗")
+        guide.stage == GuideStage.TROUBLESHOOT ->
+            listOf("我做完了，回到刚才那一步", "还是不行")
+        guide.stage == GuideStage.CONNECT ->
+            listOf("重新连接", "电视没弹窗")
+        guide.stage == GuideStage.PORT_CHECK -> emptyList()
+        guide.stage == GuideStage.DONE -> listOf("我接下来能做什么")
         answer == null -> emptyList()
         !profile.isComplete -> emptyList()
         answer.confidence == AnswerConfidence.NO_KB ->
