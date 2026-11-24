@@ -1,13 +1,73 @@
 {
   "schema": 1,
-  "kbVersion": "2026.11.23-a",
+  "kbVersion": "2026.11.24-a",
+  "note": "型号只收录公开资料里常见、能确定存在的系列名；不确定的型号宁可不写。androidVersions 留空表示没有逐个核实过系统版本，界面不要据此宣称版本专属。",
   "brands": [
-    { "id": "xiaomi", "name": "小米", "aliases": ["Xiaomi", "Redmi", "红米", "米家"], "models": [] },
-    { "id": "changhong", "name": "长虹", "aliases": ["CHANGHONG", "长虹电视"], "models": [] },
-    { "id": "hisense", "name": "海信", "aliases": ["Hisense", "VIDAA", "聚好看"], "models": [] },
-    { "id": "tcl", "name": "TCL", "aliases": ["TCL", "雷鸟", "FFALCON"], "models": [] },
-    { "id": "skyworth", "name": "创维", "aliases": ["Skyworth", "酷开", "coocaa"], "models": [] },
-    { "id": "sony", "name": "索尼", "aliases": ["Sony", "BRAVIA"], "models": [] },
-    { "id": "huawei", "name": "华为", "aliases": ["HUAWEI", "智慧屏", "HarmonyOS"], "models": [] }
+    {
+      "id": "xiaomi", "name": "小米", "aliases": ["Xiaomi", "Redmi", "红米", "米家"],
+      "models": [
+        { "id": "xiaomi-4a", "model": "4A", "displayName": "小米电视 4A" },
+        { "id": "xiaomi-4c", "model": "4C", "displayName": "小米电视 4C" },
+        { "id": "xiaomi-4s", "model": "4S", "displayName": "小米电视 4S" },
+        { "id": "xiaomi-4x", "model": "4X", "displayName": "小米电视 4X" },
+        { "id": "xiaomi-tv5", "model": "电视5", "displayName": "小米电视 5" },
+        { "id": "xiaomi-tv6", "model": "电视6", "displayName": "小米电视 6" },
+        { "id": "xiaomi-es55", "model": "ES55", "displayName": "小米电视 ES55" },
+        { "id": "xiaomi-a55", "model": "A55", "displayName": "Redmi 电视 A55" }
+      ]
+    },
+    {
+      "id": "changhong", "name": "长虹", "aliases": ["CHANGHONG", "长虹电视"],
+      "models": [
+        { "id": "changhong-d5p", "model": "D5P", "displayName": "长虹 D5P 系列" },
+        { "id": "changhong-d6p", "model": "D6P", "displayName": "长虹 D6P 系列" },
+        { "id": "changhong-d8p", "model": "D8P", "displayName": "长虹 D8P 系列" }
+      ]
+    },
+    {
+      "id": "hisense", "name": "海信", "aliases": ["Hisense", "VIDAA", "聚好看"],
+      "models": [
+        { "id": "hisense-e3d", "model": "E3D", "displayName": "海信 E3D 系列" },
+        { "id": "hisense-e5d", "model": "E5D", "displayName": "海信 E5D 系列" },
+        { "id": "hisense-e7d", "model": "E7D", "displayName": "海信 E7D 系列" },
+        { "id": "hisense-u7e", "model": "U7E", "displayName": "海信 U7E 系列" },
+        { "id": "hisense-u8e", "model": "U8E", "displayName": "海信 U8E 系列" }
+      ]
+    },
+    {
+      "id": "tcl", "name": "TCL", "aliases": ["TCL", "雷鸟", "FFALCON"],
+      "models": [
+        { "id": "tcl-v6", "model": "V6", "displayName": "TCL V6 系列" },
+        { "id": "tcl-v8", "model": "V8", "displayName": "TCL V8 系列" },
+        { "id": "tcl-q10", "model": "Q10", "displayName": "TCL Q10 系列" }
+      ]
+    },
+    {
+      "id": "skyworth", "name": "创维", "aliases": ["Skyworth", "酷开", "coocaa"],
+      "models": [
+        { "id": "skyworth-a5", "model": "A5", "displayName": "创维 A5 系列" },
+        { "id": "skyworth-a7", "model": "A7", "displayName": "创维 A7 系列" },
+        { "id": "skyworth-a8", "model": "A8", "displayName": "创维 A8 系列" }
+      ]
+    },
+    {
+      "id": "sony", "name": "索尼", "aliases": ["Sony", "BRAVIA"],
+      "models": [
+        { "id": "sony-x80j", "model": "X80J", "displayName": "索尼 X80J 系列" },
+        { "id": "sony-x85j", "model": "X85J", "displayName": "索尼 X85J 系列" },
+        { "id": "sony-x90j", "model": "X90J", "displayName": "索尼 X90J 系列" },
+        { "id": "sony-x95j", "model": "X95J", "displayName": "索尼 X95J 系列" },
+        { "id": "sony-a80j", "model": "A80J", "displayName": "索尼 A80J 系列" }
+      ]
+    },
+    {
+      "id": "huawei", "name": "华为", "aliases": ["HUAWEI", "智慧屏", "HarmonyOS"],
+      "models": [
+        { "id": "huawei-v55i", "model": "V55i", "displayName": "华为智慧屏 V55i" },
+        { "id": "huawei-v65i", "model": "V65i", "displayName": "华为智慧屏 V65i" },
+        { "id": "huawei-x65", "model": "X65", "displayName": "华为智慧屏 X65" },
+        { "id": "huawei-se55", "model": "SE55", "displayName": "华为智慧屏 SE55" }
+      ]
+    }
   ]
 }

@@ -224,6 +224,16 @@ class KbDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB
             "SELECT * FROM models WHERE brand_id = ? ORDER BY model", arrayOf(brandId)
         ).use { c -> c.map { TvModel(it.getString(0), it.getString(1), it.getString(2), it.getString(3), it.jsonList(4)) } }
 
+    fun model(id: String): TvModel? =
+        readableDatabase.rawQuery("SELECT * FROM models WHERE id = ?", arrayOf(id))
+            .use { c ->
+                if (!c.moveToFirst()) null
+                else TvModel(c.getString(0), c.getString(1), c.getString(2), c.getString(3), c.jsonList(4))
+            }
+
+    fun modelIds(): Set<String> =
+        readableDatabase.rawQuery("SELECT id FROM models", null).use { c -> c.map { it.getString(0) }.toSet() }
+
     // ---------- 方法 ----------
 
     fun upsertMethod(m: Method) {
@@ -245,6 +255,9 @@ class KbDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB
         readableDatabase.rawQuery("SELECT COUNT(*) FROM methods", null).use { c ->
             if (c.moveToFirst()) c.getInt(0) else 0
         }
+
+    fun methodIds(): Set<String> =
+        readableDatabase.rawQuery("SELECT id FROM methods", null).use { c -> c.map { it.getString(0) }.toSet() }
 
     // ---------- 验证记录 / 历史 ----------
 

@@ -30,34 +30,44 @@ class KbRepository(
     private val seedLock = Mutex()
 
     suspend fun ensureSeeded() = withContext(Dispatchers.IO) {
-        seedLock.withLock {
-            if (db.methodCount() == 0) seedFromAssets()
-        }
+        seedLock.withLock { syncFromAssets() }
     }
 
-    private fun seedFromAssets() {
-        val brandsJson = context.assets.open("kb/brands.json").bufferedReader().use { it.readText() }
-        JSONObject(brandsJson).getJSONArray("brands").let { arr ->
+    /**
+     * 内置知识库同步：按 kbVersion 判断要不要跑。
+     *
+     * 只新增缺失的品牌/型号/方法，绝不 upsert 已存在的方法——
+     * 否则一次升级就会把用户验证出来的推荐状态、成功次数和历史记录覆盖掉。
+     */
+    private fun syncFromAssets() {
+        val meta = context.getSharedPreferences("kb_meta", Context.MODE_PRIVATE)
+        val root = JSONObject(assetsText("kb/brands.json"))
+        val version = root.optString("kbVersion", "0")
+        val firstRun = db.methodCount() == 0
+        if (!firstRun && meta.getString(KEY_KB_VERSION, null) == version) return
+
+        val incomingBrands = ArrayList<Brand>()
+        val incomingModels = ArrayList<TvModel>()
+        root.getJSONArray("brands").let { arr ->
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
-                db.upsertBrand(Brand(o.getString("id"), o.getString("name"), o.optStringList("aliases")))
+                val brand = Brand(o.getString("id"), o.getString("name"), o.optStringList("aliases"))
+                incomingBrands += brand
                 o.optJSONArray("models")?.let { ms ->
                     for (j in 0 until ms.length()) {
                         val m = ms.getJSONObject(j)
-                        db.upsertModel(
-                            TvModel(
-                                m.getString("id"), o.getString("id"), m.getString("model"),
-                                m.optString("displayName", m.getString("model")),
-                                m.optStringList("androidVersions")
-                            )
+                        incomingModels += TvModel(
+                            m.getString("id"), brand.id, m.getString("model"),
+                            m.optString("displayName", m.getString("model")),
+                            m.optStringList("androidVersions")
                         )
                     }
                 }
             }
         }
 
-        val tutJson = context.assets.open("kb/tutorials.json").bufferedReader().use { it.readText() }
-        JSONObject(tutJson).getJSONArray("tutorials").let { arr ->
+        val incomingMethods = ArrayList<Method>()
+        JSONObject(assetsText("kb/tutorials.json")).getJSONArray("tutorials").let { arr ->
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 val steps = o.getJSONArray("steps").let { ss ->
@@ -80,7 +90,7 @@ class KbRepository(
                     }
                 } ?: emptyList()
 
-                val method = Method(
+                incomingMethods += Method(
                     id = o.getString("id"),
                     brandId = o.getString("brandId"),
                     modelId = o.optString("modelId").takeIf { it.isNotBlank() && it != "null" },
@@ -95,11 +105,21 @@ class KbRepository(
                     sources = sources,
                     updatedAt = o.optLong("collectedAt", 0L)
                 )
-                db.upsertMethod(method)
-                db.insertHistory(MethodHistory(method.id, "CREATED", "内置资料入库，状态：候选", method.updatedAt))
             }
         }
+
+        incomingBrands.forEach { db.upsertBrand(it) }
+        KbMerge.newModels(db.modelIds(), incomingModels).forEach { db.upsertModel(it) }
+        val now = System.currentTimeMillis()
+        KbMerge.newMethods(db.methodIds(), incomingMethods).forEach { m ->
+            db.upsertMethod(m)
+            db.insertHistory(MethodHistory(m.id, "CREATED", "内置资料入库，状态：候选", now))
+        }
+        meta.edit().putString(KEY_KB_VERSION, version).apply()
     }
+
+    private fun assetsText(path: String): String =
+        context.assets.open(path).bufferedReader().use { it.readText() }
 
     fun brands(): List<Brand> = db.brands()
     fun models(brandId: String): List<TvModel> = db.models(brandId)
@@ -159,9 +179,11 @@ class KbRepository(
 
     /**
      * 记录一次验证。
-     * - SUCCESS_APP 必须由 [ConnectionOracle] 证实真的连着，否则整条拒绝（返回 null，不写库）。
+     * - SUCCESS_APP 必须由 [ConnectionOracle] 证实「真连着 + 设备与方法品牌/型号一致」，
+     *   否则整条拒绝（返回 Rejected，不写库）。
+     * - SUCCESS_APP 写入的设备型号/系统版本一律用 Adb.info 读到的真实值，不用手填值。
      * - 成功次数只增不减；失败不清零成功记录。
-     * - 失败原因留空时固定记为「未提供原因」，不允许空白。
+     * - 失败原因留空时固定记为「未提供原因」，verifications 表里不写 null。
      */
     fun recordVerification(
         methodId: String,
@@ -169,18 +191,40 @@ class KbRepository(
         osVersion: String?,
         deviceModel: String?,
         reason: String?
-    ): Method? {
-        val current = db.method(methodId) ?: return null
-        val effective = VerificationRules.effectiveResult(result, oracle) ?: return null
+    ): RecordOutcome {
+        val current = db.method(methodId) ?: return RecordOutcome.Rejected("知识库里没有这条方法。")
+        val brand = db.brands().firstOrNull { it.id == current.brandId }
+            ?: return RecordOutcome.Rejected("知识库里没有这个品牌。")
+        val model = current.modelId?.let { db.model(it) }
+
+        if (result == VerifyResult.SUCCESS_APP) {
+            VerificationRules.successProblem(oracle, current, brand, model)?.let {
+                return RecordOutcome.Rejected(it)
+            }
+        }
+        val effective = VerificationRules.effectiveResult(result, oracle, current, brand, model)
+            ?: return RecordOutcome.Rejected("当前条件不能记录「APP 实测成功」。")
+
         val now = System.currentTimeMillis()
         val updated = MethodRules.afterVerification(current, effective, now)
+
+        // APP 实测：设备和系统以电视自己报告的为准，不采用用户手填
+        val realModel = if (effective == VerifyResult.SUCCESS_APP) {
+            oracle.deviceModel()?.takeIf { it.isNotBlank() }
+        } else {
+            deviceModel?.takeIf { it.isNotBlank() } ?: oracle.deviceModel()
+        }
+        val realOs = if (effective == VerifyResult.SUCCESS_APP) {
+            oracle.deviceRelease()?.takeIf { it.isNotBlank() } ?: osVersion
+        } else {
+            osVersion?.takeIf { it.isNotBlank() }
+        }
 
         db.upsertMethod(updated)
         db.insertVerification(
             Verification(
-                methodId, effective, osVersion,
-                deviceModel?.takeIf { it.isNotBlank() } ?: oracle.deviceModel(),
-                reason?.let { VerificationRules.normalizeReason(it) },
+                methodId, effective, realOs, realModel,
+                VerificationRules.normalizeReason(reason),
                 now
             )
         )
@@ -192,10 +236,10 @@ class KbRepository(
             else -> "VERIFIED"
         }
         val detail = VerificationRules.historyDetail(
-            effective, osVersion, deviceModel, reason, updated.successCount, updated.failCount
+            effective, realOs, realModel, reason, updated.successCount, updated.failCount
         )
         db.insertHistory(MethodHistory(methodId, change, detail, now))
-        return updated
+        return RecordOutcome.Updated(updated, detail)
     }
 
     fun history(methodId: String): List<MethodHistory> = db.history(methodId)
@@ -208,4 +252,15 @@ class KbRepository(
 
     @Suppress("unused")
     private fun JSONArray.toStringList(): List<String> = List(length()) { getString(it) }
+
+    private companion object {
+        const val KEY_KB_VERSION = "kb_version"
+    }
 }
+
+/** 记录验证的结果：要么真的写进去了，要么带着原因被拒绝（界面要如实显示） */
+sealed interface RecordOutcome {
+    data class Updated(val method: Method, val detail: String) : RecordOutcome
+    data class Rejected(val reason: String) : RecordOutcome
+}
+

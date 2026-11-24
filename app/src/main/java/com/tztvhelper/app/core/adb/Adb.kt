@@ -6,6 +6,7 @@ import com.flyfishxu.kadb.Kadb
 import com.flyfishxu.kadb.cert.KadbCert
 import com.flyfishxu.kadb.cert.OkioFilePrivateKeyStore
 import com.flyfishxu.kadb.install
+import com.tztvhelper.app.data.Pkgs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -121,14 +122,6 @@ object Adb {
         )
     }
 
-    suspend fun raw(command: String): Result<String> = withContext(Dispatchers.IO) {
-        val k = kadb ?: return@withContext Result.failure(IllegalStateException("还没有连接电视"))
-        runCatching {
-            val r = k.shell(command)
-            r.allOutput.ifBlank { r.output }
-        }
-    }
-
     suspend fun listApps(): Result<List<AppEntry>> = withContext(Dispatchers.IO) {
         val k = kadb ?: return@withContext Result.failure(IllegalStateException("还没有连接电视"))
         runCatching {
@@ -152,6 +145,8 @@ object Adb {
 
     /** 禁用预装应用。执行后一定回读状态，失败就报失败，绝不假装成功。 */
     suspend fun disable(pkg: String): Result<String> = withContext(Dispatchers.IO) {
+        // 界面藏按钮只是体验，这里才是底线：关键应用、非法包名一律拒绝
+        Pkgs.denyDisableReason(pkg)?.let { return@withContext Result.failure(SecurityException(it)) }
         val k = kadb ?: return@withContext Result.failure(IllegalStateException("还没有连接电视"))
         runCatching {
             val out = k.shell("pm disable-user --user 0 $pkg").allOutput
@@ -164,6 +159,9 @@ object Adb {
     }
 
     suspend fun enable(pkg: String): Result<String> = withContext(Dispatchers.IO) {
+        if (!Pkgs.isValidName(pkg)) {
+            return@withContext Result.failure(SecurityException("包名不合法，已拒绝执行。"))
+        }
         val k = kadb ?: return@withContext Result.failure(IllegalStateException("还没有连接电视"))
         runCatching {
             val out = k.shell("pm enable $pkg").allOutput
@@ -174,7 +172,15 @@ object Adb {
     }
 
     suspend fun uninstall(pkg: String): Result<String> = withContext(Dispatchers.IO) {
+        if (!Pkgs.isValidName(pkg)) {
+            return@withContext Result.failure(SecurityException("包名不合法，已拒绝执行。"))
+        }
         val k = kadb ?: return@withContext Result.failure(IllegalStateException("还没有连接电视"))
+        // 卸载前以电视自己报告的第三方列表为准，不信任界面传进来的判断
+        val thirdParty = runCatching { pkgSet(k, "pm list packages -3").contains(pkg) }.getOrDefault(false)
+        Pkgs.denyUninstallReason(pkg, thirdParty)?.let {
+            return@withContext Result.failure(SecurityException(it))
+        }
         runCatching {
             val out = k.shell("pm uninstall --user 0 $pkg").allOutput
             if (!out.contains("Success")) error("卸载失败：${out.trim().take(160)}")

@@ -1,7 +1,9 @@
 package com.tztvhelper.app.core.search
 
 import com.tztvhelper.app.core.kb.Credibility
+import com.tztvhelper.app.core.kb.Method
 import com.tztvhelper.app.core.kb.SourceType
+import com.tztvhelper.app.core.kb.TutorialStep
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -37,6 +39,30 @@ class SearchSaveGuardTest {
         fromCache = false,
         cacheKey = "k"
     )
+
+    @Test
+    fun `型号未解析的搜索结果不能存成品牌通用`() {
+        // 用户填了「小米 4A Pro」，但知识库 models 表里没有 → 不能降级成品牌通用
+        assertEquals(
+            SearchSaveGuard.Problem.UNRESOLVED_MODEL,
+            SearchSaveGuard.modelScopeProblem("4A Pro", null)
+        )
+        // 没填型号：明确按品牌通用保存，允许
+        assertNull(SearchSaveGuard.modelScopeProblem(null, null))
+        assertNull(SearchSaveGuard.modelScopeProblem("  ", null))
+        // 填了且能解析成库内型号：允许
+        assertNull(SearchSaveGuard.modelScopeProblem("4A", "xiaomi-4a"))
+    }
+
+    @Test
+    fun `解析到型号时保存的是型号级而不是品牌通用`() {
+        val m = Method(
+            id = "m", brandId = "xiaomi", modelId = "xiaomi-4a", title = "t",
+            scope = "model", steps = listOf(TutorialStep(1, "a", "b"))
+        )
+        assertEquals("model", m.scope)
+        assertEquals("xiaomi-4a", m.modelId)
+    }
 
     @Test
     fun `正常结果通过校验`() {

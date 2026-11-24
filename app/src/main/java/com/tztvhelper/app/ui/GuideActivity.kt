@@ -53,6 +53,7 @@ import com.tztvhelper.app.core.kb.MatchLevel
 import com.tztvhelper.app.core.kb.MatchResult
 import com.tztvhelper.app.core.kb.Method
 import com.tztvhelper.app.core.kb.MethodStatus
+import com.tztvhelper.app.core.kb.RecordOutcome
 import com.tztvhelper.app.core.kb.TvModel
 import com.tztvhelper.app.core.kb.VerifyResult
 import com.tztvhelper.app.core.search.SaveResult
@@ -155,18 +156,19 @@ private fun GuideScreen(onBack: () -> Unit) {
 
     fun verify(res: VerifyResult, reason: String? = null) {
         val m = current ?: return
-        val updated = repo.recordVerification(
+        when (val r = repo.recordVerification(
             m.id, res, osVersion.ifBlank { null }, model.ifBlank { null }, reason
-        )
-        if (updated == null) {
-            note = "没记上：APP 当前没有真实连接（或读不到设备信息），不能算「APP 实测成功」。"
-            return
+        )) {
+            is RecordOutcome.Rejected -> {
+                note = "没记上：${r.reason}"
+                return
+            }
+            is RecordOutcome.Updated -> current = r.method
         }
-        current = updated
         note = when (res) {
-            VerifyResult.SUCCESS_APP -> "已记录：APP 实测成功（有真实连接依据），这条方法升为推荐。"
+            VerifyResult.SUCCESS_APP -> "已记录：APP 实测成功（有真实连接依据，且设备与方法一致），这条方法升为推荐。"
             VerifyResult.SUCCESS_USER -> "已记录成功。累计 2 次成功后会升为推荐。"
-            VerifyResult.FAILURE -> "已记录失败，原因已存档。原成功记录保留，方法转入待复核。"
+            VerifyResult.FAILURE -> "已记录失败，原因已存档。原成功记录保留。"
         }
     }
 
@@ -206,7 +208,6 @@ private fun GuideScreen(onBack: () -> Unit) {
             val r = svc.saveAsCandidate(
                 outcome = o,
                 brandId = b.id,
-                modelId = resolvedModel?.id,
                 modelText = model.ifBlank { null },
                 osVersion = osVersion.ifBlank { null },
                 hitIndex = idx,
@@ -219,6 +220,7 @@ private fun GuideScreen(onBack: () -> Unit) {
             SaveResult.NoHit -> "没有选中任何一条结果。"
             SaveResult.IdentityMismatch -> "搜索时的品牌/型号/版本和现在不一致，不能存。请重新搜索。"
             SaveResult.InvalidUrl -> "这条结果的链接不合法，不能入库。"
+            SaveResult.UnresolvedModel -> "你填的型号不在知识库型号表里，不能存成品牌通用方法（那样会推给同品牌所有型号）。请先在「我的电视」里选一个知识库已有的型号。"
             is SaveResult.Failed -> "保存失败：${r.reason}"
         }
     }

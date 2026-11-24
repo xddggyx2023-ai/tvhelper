@@ -11,4 +11,8 @@ object AdbConnectionOracle : ConnectionOracle {
     override fun isConnected(): Boolean = Adb.isConnected() && Adb.info != null
 
     override fun deviceModel(): String? = Adb.info?.model
+
+    override fun deviceBrand(): String? = Adb.info?.brand
+
+    override fun deviceRelease(): String? = Adb.info?.release
 }

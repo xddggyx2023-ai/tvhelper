@@ -30,13 +30,24 @@ sealed interface SaveResult {
     data object NoHit : SaveResult
     data object IdentityMismatch : SaveResult
     data object InvalidUrl : SaveResult
+
+    /** 用户填了型号，但知识库里没有这个型号：不能存成品牌通用（否则会推给同品牌所有型号） */
+    data object UnresolvedModel : SaveResult
     data class Failed(val reason: String) : SaveResult
 }
 
 /** 纯函数：保存前的全部校验，界面藏按钮不能替代它 */
 object SearchSaveGuard {
 
-    enum class Problem { RESPONSE_ERROR, MOCK, IDENTITY_MISMATCH, NO_HIT, INVALID_URL, NO_STEPS }
+    enum class Problem { RESPONSE_ERROR, MOCK, IDENTITY_MISMATCH, NO_HIT, INVALID_URL, NO_STEPS, UNRESOLVED_MODEL }
+
+    /**
+     * 型号作用域校验（纯函数）：
+     * 用户填了型号却解析不到库内型号时，拒绝存成品牌通用。
+     * 返回 null = 可以存（要么没填型号→品牌通用，要么型号已解析→型号级）。
+     */
+    fun modelScopeProblem(modelText: String?, resolvedModelId: String?): Problem? =
+        if (!modelText.isNullOrBlank() && resolvedModelId.isNullOrBlank()) Problem.UNRESOLVED_MODEL else null
 
     fun check(
         outcome: SearchOutcome,
@@ -120,46 +131,54 @@ class SearchService(
      * 把用户明确选中的那一条结果转成"候选方法"。
      * 硬规则（服务层自己校验，不依赖界面）：
      * - 失败响应、模拟数据、跨品牌/跨型号、无效链接、没有步骤，一律拒绝。
+     * - modelId 由服务自己解析，不接受外部传入（外部传错会把 4A 的教程挂到 4C 上）。
+     * - 填了型号但库里没有这个型号时，拒绝存成品牌通用。
      */
     fun saveAsCandidate(
         outcome: SearchOutcome,
         brandId: String,
-        modelId: String?,
         modelText: String?,
         osVersion: String?,
         hitIndex: Int,
         title: String
-    ): SaveResult = when (val problem = SearchSaveGuard.check(outcome, brandId, modelText, osVersion, hitIndex)) {
-        SearchSaveGuard.Problem.RESPONSE_ERROR ->
-            SaveResult.Failed("这次搜索本身失败了（${outcome.response.error}），不能入库")
-        SearchSaveGuard.Problem.MOCK -> SaveResult.MockBlocked
-        SearchSaveGuard.Problem.IDENTITY_MISMATCH -> SaveResult.IdentityMismatch
-        SearchSaveGuard.Problem.NO_HIT -> SaveResult.NoHit
-        SearchSaveGuard.Problem.INVALID_URL -> SaveResult.InvalidUrl
-        SearchSaveGuard.Problem.NO_STEPS -> SaveResult.NoSteps
-        null -> {
-            val hit = outcome.response.hits[hitIndex]
-            val steps = hit.extractedSteps.mapIndexed { i, s ->
-                TutorialStep(n = i + 1, title = "第 ${i + 1} 步", detail = s, note = "来源：${hit.url}")
-            }
-            val method = repo.addCandidate(
-                brandId = brandId,
-                modelId = modelId,
-                title = title.ifBlank { hit.title },
-                steps = steps,
-                notes = "由搜索结果整理，未经实机验证；原文摘要：${hit.snippet}",
-                confidence = hit.credibility.takeIf { it != Credibility.UNVERIFIED } ?: Credibility.UNVERIFIED,
-                sources = listOf(
-                    SourceRef(
-                        type = hit.sourceType,
-                        url = hit.url,
-                        title = hit.title,
-                        collectedAt = hit.fetchedAt,
-                        credibility = hit.credibility
+    ): SaveResult {
+        val resolvedModelId = repo.resolveModelId(brandId, modelText)
+        if (SearchSaveGuard.modelScopeProblem(modelText, resolvedModelId) == SearchSaveGuard.Problem.UNRESOLVED_MODEL) {
+            return SaveResult.UnresolvedModel
+        }
+        return when (val problem = SearchSaveGuard.check(outcome, brandId, modelText, osVersion, hitIndex)) {
+            SearchSaveGuard.Problem.RESPONSE_ERROR ->
+                SaveResult.Failed("这次搜索本身失败了（${outcome.response.error}），不能入库")
+            SearchSaveGuard.Problem.MOCK -> SaveResult.MockBlocked
+            SearchSaveGuard.Problem.IDENTITY_MISMATCH -> SaveResult.IdentityMismatch
+            SearchSaveGuard.Problem.NO_HIT -> SaveResult.NoHit
+            SearchSaveGuard.Problem.INVALID_URL -> SaveResult.InvalidUrl
+            SearchSaveGuard.Problem.NO_STEPS -> SaveResult.NoSteps
+            SearchSaveGuard.Problem.UNRESOLVED_MODEL -> SaveResult.UnresolvedModel
+            null -> {
+                val hit = outcome.response.hits[hitIndex]
+                val steps = hit.extractedSteps.mapIndexed { i, s ->
+                    TutorialStep(n = i + 1, title = "第 ${i + 1} 步", detail = s, note = "来源：${hit.url}")
+                }
+                val method = repo.addCandidate(
+                    brandId = brandId,
+                    modelId = resolvedModelId,
+                    title = title.ifBlank { hit.title },
+                    steps = steps,
+                    notes = "由搜索结果整理，未经实机验证；原文摘要：${hit.snippet}",
+                    confidence = hit.credibility,
+                    sources = listOf(
+                        SourceRef(
+                            type = hit.sourceType,
+                            url = hit.url,
+                            title = hit.title,
+                            collectedAt = hit.fetchedAt,
+                            credibility = hit.credibility
+                        )
                     )
                 )
-            )
-            SaveResult.Saved(method.id)
+                SaveResult.Saved(method.id)
+            }
         }
     }
 

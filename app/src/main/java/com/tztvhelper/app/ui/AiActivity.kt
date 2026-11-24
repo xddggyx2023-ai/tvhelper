@@ -345,7 +345,6 @@ private fun AiSearchBlock(profile: DeviceProfile, repo: KbRepository) {
             val r = service().saveAsCandidate(
                 outcome = o,
                 brandId = brandId,
-                modelId = repo.resolveModel(brandId, profile.model)?.id,
                 modelText = profile.model,
                 osVersion = profile.osVersion,
                 hitIndex = idx,
@@ -358,6 +357,7 @@ private fun AiSearchBlock(profile: DeviceProfile, repo: KbRepository) {
             SaveResult.NoHit -> "先点选一条结果。"
             SaveResult.IdentityMismatch -> "搜索条件和当前电视不一致，请重新搜索。"
             SaveResult.InvalidUrl -> "这条结果的链接不合法，不能入库。"
+            SaveResult.UnresolvedModel -> "你填的型号不在知识库型号表里，不能存成品牌通用方法（会推给同品牌所有型号）。请先选一个知识库已有的型号。"
             is SaveResult.Failed -> "保存失败：${r.reason}"
         }
     }
